@@ -1,0 +1,6 @@
+/files
+*.bat
+*.cmd
+*log*
+/node_modules
+/private

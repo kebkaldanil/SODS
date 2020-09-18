@@ -1,0 +1,23 @@
+{
+  "name": "sods",
+  "version": "0.15.4",
+  "description": "Simle Object Defined Server",
+  "main": "SODS.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kebkaldanil/SODS.git"
+  },
+  "author": "kamikoto00",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/kebkaldanil/SODS/issues"
+  },
+  "homepage": "https://github.com/kebkaldanil/SODS#readme",
+  "dependencies": {
+    "jszip": "^3.4.0",
+    "mime": "^2.4.4"
+  }
+}

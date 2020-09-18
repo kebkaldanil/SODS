@@ -1,0 +1,72 @@
+body
+{
+    font-size: 2em
+}
+
+.file
+{
+	border: 1px solid black;
+	margin: 5px;
+	padding: 5px
+}
+
+.path
+{
+	color: inherit;
+	text-decoration: inherit;
+	border: 1px solid black;
+	margin: -1px;
+	width: 100%;
+	display: inline-block;
+}
+
+.download
+{
+	height: 100%;
+}
+
+#back
+{
+	text-decoration: none;
+	display: block
+}
+
+#viewer_container
+{
+   	position: fixed;
+   	top: 80%;
+   	left: 70%;
+   	resize: both;
+   	overflow: hidden;
+   	background: white;
+   	display: none
+}
+
+#viewer
+{
+   	width: 96%;
+   	height: 100%
+}
+
+#viewer_close, #viewer_move, #viewer_resize
+{
+   	position: absolute;
+   	right: 0;
+   	cursor: pointer;
+   	top: 0;
+   	width: 1em;
+   	height: 1em
+}
+
+#viewer_move
+{
+   	top: 50%;
+   	cursor: move
+}
+
+#viewer_resize
+{
+   	top: auto;
+   	bottom: 0;
+   	cursor: nwse-resize
+}
