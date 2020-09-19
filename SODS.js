@@ -50,6 +50,17 @@ const tools = {
 		}
 		res.push(str);
 		return res;
+	},
+	deepCopy: (obj) => {
+		const res = {};
+		for (const nm in obj) {
+			const v = obj[nm];
+			if (typeof v === "object")
+				res[nm] = tools.deepCopy(v);
+			else
+				res[nm] = v;
+		}
+		return res;
 	}
 }
 
@@ -261,13 +272,13 @@ function crt(processor, port = args.port, options) {
 }
 
 function processRouteObj(v) {
-	if (typeof v == "string")
-		v = eval(v.startsWith('{') ? `(${v})` : v);
-	return Object.assign({}, v);//convertStrings2FuncInObj(Object.assign({}, v));
+	return typeof v === "string"
+	? eval(v.startsWith('{') ? `(${v})` : v)
+	: tools.deepCopy(v);//convertStrings2FuncInObj(Object.assign({}, v));
 }
 
 function loadRouteObj(file) {
-	return processRouteObj(fs.readFileSync(file).toString());
+	return processRouteObj(fs.readFileSync(file, "utf8"));
 }
 
 function convertStrings2FuncInObj(obj) {
@@ -455,11 +466,12 @@ async function createSubServer(processor, ports, options) {
 	}
 }
 
-async function defaultServerStart(routeObj = "route.js", evalF = eval, httpsCert, httpPort = [[80], [8080], "*"], httpsPort = [[443], [8443], "*"]) {
-	if (typeof httpsCert !== "object" && !httpPort) {
+async function defaultServerStart(routeObj = "route.js", evalF = eval, httpsCert, httpPort, httpsPort = [[443], [8443], "*"]) {
+	if (httpsCert && (typeof httpsCert !== "object" || Array.isArray(httpsCert) && !httpPort)) {
 		httpPort = httpsCert;
 		httpsCert = undefined;
-	}
+	} else if (!httpPort)
+		httpPort = [[80], [8080], "*"];
 	httpPort = normPort(httpPort);
 	httpsPort = normPort(httpsPort);
 	if (typeof routeObj === "string")
@@ -614,8 +626,8 @@ function crudApi(...args) {
 
 function printIPs(tabs = 0) {
 	const ips = {
-		"IPv4": [],
-		"IPv6": []
+		/*"IPv4": [],
+		"IPv6": []*/
 	};
 	let strtbs = "";
 	while (tabs--)
@@ -660,7 +672,7 @@ if (!("map2obj" in Array.prototype))
 	Array.prototype.map2obj = map2obj;
 
 if (module === require.main) {
-	console.log("SODS 0.15.4 \nargs:");
+	console.log("SODS 0.15.5 \nargs:");
 	console.log(args);
 	console.log("Initializing...");
 	defaultServerStart().then(() => {

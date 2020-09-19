@@ -2,6 +2,7 @@
 
 const SODS = require("./SODS");
 const fs = require("fs");
+const { Socket } = require("dgram");
 
 const exit = process.exit;
 
@@ -28,6 +29,17 @@ if (!fs.existsSync(process.args.filesDir))
 	const servers = await SODS.defaultServerStart("./route.js", function (l) {
 		return eval(l);
 	}, httpsCert, [[80], [8080], '*'], [[443], [8443], '*']);
+
+	/*for (const port in servers) {
+		if (port !== "processor") {
+			servers[port].addListener("connection", socket => {
+				const rport = socket.remotePort;
+				socket.addListener("close", () => {
+					console.log(`Socket closed on port ${port} to ${rport}`);
+				});
+			});
+		}
+	}*/
 
 	const changeRouteObj = obj => {
 		servers.processor.changeRouteObj(obj);
