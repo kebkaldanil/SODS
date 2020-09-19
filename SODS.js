@@ -661,7 +661,7 @@ exports.redirect = redirect;
 exports.notFound = notFound;
 exports.crudApi = crudApi;
 //exports.host = host;
-exports.setMime = m => mime = m, this;
+exports.setMime = m => mime = m, exports;
 exports.printIPs = printIPs;
 
 if (!("args" in process))
