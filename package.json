@@ -1,9 +1,10 @@
 {
   "name": "sods",
-  "version": "0.15.5",
+  "version": "0.16.0",
   "description": "Simle Object Defined Server",
   "main": "SODS.js",
   "scripts": {
+    "start": "tsc && node build/app",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -19,5 +20,9 @@
   "dependencies": {
     "jszip": "^3.4.0",
     "mime": "^2.4.4"
+  },
+  "devDependencies": {
+    "@types/mime": "^2.0.3",
+    "@types/node": "^14.11.1"
   }
 }

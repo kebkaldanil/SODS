@@ -1,0 +1,14 @@
+{
+	"compilerOptions": {
+		"target": "ES2017",
+		"module": "commonjs",
+		"sourceMap": true,
+		"outDir": "build",
+		"rootDir": "src",
+		"removeComments": true
+	},
+	//указывает что включаться должны только файлы из папки /src
+	"include": [
+		"src/**/*"
+	]
+}

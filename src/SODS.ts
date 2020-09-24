@@ -1,16 +1,36 @@
-'use strict'
+import { createReadStream, PathLike, Stats } from "fs";
+import { readFile, stat } from "fs/promises";
+import { createServer as createHttpServer, ServerResponse, IncomingMessage, OutgoingHttpHeaders, RequestListener } from "http";
+import { networkInterfaces } from "os";
+import * as mime from "mime";
+import { ServerOptions, createServer as createHttpsServer } from "https";
 
-const fs = require("fs");
-const http = require("http");
-const https = require("https");
-const os = require("os");
-const util = require("util");
-const { exit } = require("process");
-const fsstat = util.promisify(fs.stat);
 //const parrent = Symbol("parrent");
 
-const tools = {
-	time: (strings, ...params) => {
+export class RequestMessage extends IncomingMessage {
+	cookies: any;
+	stringParams: any;
+	body: Promise<string>;
+}
+
+export class RequestObject {
+	request: RequestMessage;
+	response: ServerResponse;
+	fpath: string;
+	queue: ((o: RequestObject, path: string) => void)[];
+	doLog: boolean;
+};
+
+type PortsArr = (number[] | number | "*")[];
+
+type ServOptions = {
+	silense?: boolean,
+	mode: "http" | "https",
+	serverOptions?: ServerOptions
+};
+
+export const tools = {
+	time: (strings: TemplateStringsArray, ...params: any[]) => {
 		var res = "";
 		let i = 0;
 		while (i < params.length) {
@@ -20,17 +40,17 @@ const tools = {
 		}
 		return res + strings[i];
 	},
-	_lengthOpti: (length, be) => {
-		be = "" + Math.trunc(be);
-		return "000000000000".slice(12 + be.length - length) + be;
+	_lengthOpti: (length: number, be: number) => {
+		const bs = "" + Math.trunc(be);
+		return "000000000000".slice(12 + bs.length - length) + bs;
 	},
 	get formatedTime() {
 		const p = new Date();
 		return tools.time`${p.getHours()}:${p.getMinutes()}:${p.getSeconds()}.${tools._lengthOpti(3, p.getMilliseconds())}`;
 	},
-	_rand: (start, lngth) => Math.floor(Math.random() * lngth + start),
-	random: (start, end) => tools._rand(start, end - start),
-	split: (str = "", separator = "", count = -1) => {
+	_rand: (start: number, lngth: number) => Math.floor(Math.random() * lngth + start),
+	random: (start: number, end: number) => tools._rand(start, end - start),
+	split: (str: string, separator: string = "", count: number = -1) => {
 		if (count < 0)
 			return str.split(separator);
 		if (count === 0)
@@ -38,7 +58,7 @@ const tools = {
 		str = "" + str;
 		if (count === 1)
 			return [str];
-		const res = [];
+		const res: string[] = [];
 		while (count !== 1) {
 			count--;
 			separator = "" + separator;
@@ -51,12 +71,12 @@ const tools = {
 		res.push(str);
 		return res;
 	},
-	deepCopy: (obj) => {
-		const res = {};
+	deepCopy: <T extends object>(obj: T): T => {
+		const res = new Object() as any;
 		for (const nm in obj) {
 			const v = obj[nm];
 			if (typeof v === "object")
-				res[nm] = tools.deepCopy(v);
+				res[nm] = tools.deepCopy(v as any);
 			else
 				res[nm] = v;
 		}
@@ -64,9 +84,9 @@ const tools = {
 	}
 }
 
-function map2obj(l = l => tools.split(l, '=', 2)) {
-	const res = {};
-	this.forEach(s => {
+function map2obj(arr: string[], l = (l: string) => tools.split(l, '=', 2)) {
+	const res: any = {};
+	arr.forEach(s => {
 		const a = l(s);
 		if (a && a.length > 0)
 			res[a[0]] = (a.length < 2 ? true : a[1]);
@@ -74,28 +94,20 @@ function map2obj(l = l => tools.split(l, '=', 2)) {
 	return res;
 }
 
-let mime;
-
-try {
-	mime = require("mime");
-} catch (e) { }
-
 const pathNormalizeRegExp = /^\/+|\/+$|\/+(?=\/)/g;
 
 let inpLine = "";
-const args = map2obj.call(process.argv.slice(2));
+export const args = map2obj(process.argv.slice(2));
 
-function initRead(p = (0, eval), { functionRun = true, logNulls = false } = {}) {
-	if (typeof p !== "function")
-		throw TypeError(`function was expected (${typeof p} instead)`);
+export function initConcoleProcessor(lineProc: (x: string) => any = (0, eval), { functionRun = true, logNulls = false } = {}) {
 	process.stdin.setEncoding('utf8');
 	process.stdin.resume();
-	process.stdin.on("data", (data) => {
+	process.stdin.on("data", (data: string) => {
 		data.split('\n').forEach((value, index, thiz) => {
 			if (index && index === thiz.length - 1)
 				inpLine += value;
 			else (async () => {
-				let r = p(inpLine + value);
+				let r = lineProc(inpLine + value);
 				r = functionRun && typeof r === "function" ? r() : r;
 				if (logNulls || (r !== null && r !== undefined))
 					console.log(r);
@@ -104,7 +116,7 @@ function initRead(p = (0, eval), { functionRun = true, logNulls = false } = {}) 
 	});
 }
 
-async function processRequest(o, path, sect) {
+async function processRequest(o: RequestObject, path: string, sect: object) {
 	try {
 		if (sect) {
 			let proc;
@@ -147,10 +159,8 @@ async function processRequest(o, path, sect) {
 						o.response.end(res);
 						return res;
 					}
-					else {
-						//o.response.end();
+					else
 						return true;
-					}
 				}
 				else {
 					if (!o.response.hasHeader("Content-Type"))
@@ -170,7 +180,7 @@ async function processRequest(o, path, sect) {
 	}
 }
 
-const createProcessor = routeObj => Object.assign((request, response) => {
+export const createProcessor = (routeObj: object) => Object.assign((request: RequestMessage, response: ServerResponse) => {
 	let path = decodeURI(request.url);
 	const stringParams = {};
 	const spsi = path.indexOf('?');
@@ -184,8 +194,9 @@ const createProcessor = routeObj => Object.assign((request, response) => {
 		});
 		path = path.substr(0, spsi);
 	}
-	if (request.headers.cookies)
-		request.cookies = request.headers.cookies.split(';').map2obj(l => l.splitFirst().map(l => l.trim()));
+	request.stringParams = stringParams;
+	if (request.headers.cookie)
+		request.cookies = map2obj(request.headers.cookie.split(';'), (l => tools.split(l, "=", 2).map(l => l.trim())));
 	path = path.replace(pathNormalizeRegExp, "");
 	Object.defineProperty(request, "body", {
 		configurable: true,
@@ -208,7 +219,6 @@ const createProcessor = routeObj => Object.assign((request, response) => {
 	const o = {
 		request: request,
 		response: response,
-		stringParams: stringParams,
 		fpath: path,
 		queue: [],
 		doLog: true
@@ -242,19 +252,20 @@ const createProcessor = routeObj => Object.assign((request, response) => {
 	changeRouteObj: o => routeObj = (typeof o === "string" ? loadRouteObj(o) : o)
 });
 
-function crt(processor, port = args.port, options) {
+export function crt(processor: RequestListener, port = args.port, options?: ServOptions) {
 	const silense = options && options.silense;
 	const mode = options && options.mode || (typeof options === "string" && options) || "http";
+	const serverOptions = options && options.serverOptions || {};
 	return new Promise((resolve, reject) => {
 		if (!silense)
 			console.log(`Starting listener (${mode}) on port ${port}`);
 		let server;
 		switch (mode) {
 			case "http":
-				server = http.createServer(processor);
+				server = createHttpServer(serverOptions, processor);
 				break;
 			case "https":
-				server = https.createServer(options.httpsCert, processor);
+				server = createHttpsServer(serverOptions, processor);
 				break;
 			default:
 				reject(`Unsupported mode "${mode}"`);
@@ -271,14 +282,14 @@ function crt(processor, port = args.port, options) {
 	});
 }
 
-function processRouteObj(v) {
+function processRouteObj(v): object {
 	return typeof v === "string"
 		? eval(v.startsWith('{') ? `(${v})` : v)
 		: tools.deepCopy(v);//convertStrings2FuncInObj(Object.assign({}, v));
 }
 
-function loadRouteObj(file) {
-	return processRouteObj(fs.readFileSync(file, "utf8"));
+export async function loadRouteObj(file) {
+	return processRouteObj(await readFile(file, "utf8"));
 }
 
 function convertStrings2FuncInObj(obj) {
@@ -290,7 +301,7 @@ function convertStrings2FuncInObj(obj) {
 		}
 }
 
-function _pipeFile(istream, ostream) {
+export function _pipeFile(istream, ostream) {
 	return new Promise((resolve, reject) => {
 		try {
 			istream.pipe(ostream, { end: false });
@@ -304,18 +315,18 @@ function _pipeFile(istream, ostream) {
 	});
 }
 
-async function file2response(response, path, ranges, type, head, filestat) {
+export async function file2response(response: ServerResponse, path: string, ranges?: string | { start?: number, end?: number }[], type?: string, head?: OutgoingHttpHeaders, filestat?: Stats) {
 	if (!filestat)
-		filestat = await fsstat(path);
+		filestat = await stat(path);
 	if (!type)
 		type = mime.getType(path);
 	if (typeof ranges == "string") {
-		ranges = ranges.slice(6).split(",").map(r => {
+		ranges = ranges.slice(6).split(",").map((r: any) => {
 			if (!r.match(/^(?:\d+-\d*|-\d+)$/))
 				//if (r.length != 2)
 				throw { code: 400, text: "Bad Request" };
 			r = r.split("-");
-			const ra = {};
+			const ra: any = {};
 			if (r[0] != "")
 				ra.start = +r[0];
 			if (r[1] != "") {
@@ -347,12 +358,12 @@ async function file2response(response, path, ranges, type, head, filestat) {
 		ranges = [{}];
 	}
 	if (ranges.length == 1)
-		await _pipeFile(fs.createReadStream(path, ranges[0]), response);
+		await _pipeFile(createReadStream(path, ranges[0]), response);
 	else {
 		for (let i = 0; i < ranges.length; i++) {
 			const range = ranges[i];
 			response.write(`\n--3d6b6a416f9b5\nContent-Type: ${type}\nContent-Range: bytes ${range.start || 0}-${range.end === 0 ? 0 : (range.end || (filestat.size - 1))}/${filestat.size}\n\n`);
-			await _pipeFile(fs.createReadStream(path, range), response);
+			await _pipeFile(createReadStream(path, range), response);
 
 		}
 		response.write("\n--3d6b6a416f9b5--");
@@ -360,22 +371,22 @@ async function file2response(response, path, ranges, type, head, filestat) {
 	response.end();
 }
 
-function fileAsResponse(path, options) {
+export function fileAsResponse(path: string, options?: { doLog?: boolean, hostingLike?: boolean, useRange?: boolean, mime?: ((x: string) => string) | string, logErrors?: boolean }) {
 	if (!path)
 		path = "/";
 	if (!path.endsWith('/'))
 		path += '/';
 	options = Object.assign({ useRange: true, mime: mime.getType, hostingLike: false, logErrors: false }, options);
 	const dl = options.doLog;
-	return async (o, p) => {
+	return async (o: RequestObject, p: string) => {
 		try {
 			if (dl !== null && dl !== undefined)
 				o.doLog = dl;
 			let fp = path + p;
-			let filestat = await fsstat(fp);
+			let filestat = await stat(fp);
 			if (options.hostingLike && filestat.isDirectory()) {
 				fp = fp + (fp.endsWith('/') ? "" : "/") + "index.html";
-				filestat = await fsstat(fp);
+				filestat = await stat(fp);
 			}
 			o.response.setHeader("Content-Type", typeof options.mime === "function" ? options.mime(p) : options.mime);
 			if (options.useRange && !o.request.headers.range)
@@ -389,12 +400,12 @@ function fileAsResponse(path, options) {
 		} catch (e) {
 			if (o.doLog && options.logErrors)
 				console.log(e);
-			notFound(o);
+			notFound(o, options.logErrors);
 		}
 	}
 }
 
-function host(path, options) {
+export function host(path, options) {
 	if (!path)
 		path = "/";
 	if (!path.endsWith('/'))
@@ -402,11 +413,11 @@ function host(path, options) {
 
 }
 
-function getRoleByToken(token) {
+export function getRoleByToken(token) {
 
 }
 
-function authorized(_as, tokenName = "token", e1se = o => {
+export function authorized(_as, tokenName = "token", e1se = o => {
 	throw { code: 401, text: "Unauthorized" };
 }) {
 	return o => {
@@ -417,7 +428,7 @@ function authorized(_as, tokenName = "token", e1se = o => {
 	};
 }
 
-function authorization() {
+export function authorization() {
 	return {
 		".": {
 			get: (o, path) => { }
@@ -425,13 +436,13 @@ function authorization() {
 	};
 }
 
-function normPort(port) {
+function normPort(port: PortsArr | number) {
 	if (!Array.isArray(port))
 		port = [[port], "*"];
 	return port;
 }
 
-async function createSubServer(processor, ports, options) {
+export async function createSubServer(processor: RequestListener, ports: PortsArr, options?: ServOptions) {
 	for (let vrnts of ports) {
 		let brck = false;
 		if (vrnts === "*") {
@@ -466,28 +477,28 @@ async function createSubServer(processor, ports, options) {
 	}
 }
 
-async function defaultServerStart(routeObj = "route.js", evalF = eval, httpsCert, httpPort, httpsPort) {
-	if (httpsCert && (typeof httpsCert !== "object" || Array.isArray(httpsCert) && !httpPort)) {
-		httpPort = httpsCert;
-		httpsCert = undefined;
+export async function defaultServerStart(routeObj: string | object = "route.js", evalF = eval, serverOptions?: ServerOptions, httpPort?: PortsArr | number, httpsPort?: PortsArr | number) {
+	if (serverOptions && (typeof serverOptions !== "object" || Array.isArray(serverOptions) && !httpPort)) {
+		httpPort = serverOptions;
+		serverOptions = undefined;
 	} else if (httpPort)
 		httpPort = normPort(httpPort);
 	else
 		httpPort = [[80], [8080], "*"];
 	if (typeof routeObj === "string")
-		routeObj = loadRouteObj(routeObj);
+		routeObj = await loadRouteObj(routeObj);
 	const processor = createProcessor(routeObj);
-	initRead(evalF);
-	const res = await createSubServer(processor, httpPort);
-	if (httpsCert) {
+	initConcoleProcessor(evalF);
+	const res: any = await createSubServer(processor, httpPort);
+	if (serverOptions) {
 		httpsPort = httpsPort ? normPort(httpsPort) : [[443], [8443], "*"];
-		Object.assign(res, await createSubServer(processor, httpsPort, { mode: "https", httpsCert: httpsCert }));
+		Object.assign(res, await createSubServer(processor, httpsPort, { mode: "https", serverOptions }));
 	}
 	res.processor = processor;
 	return res;
 }
 
-function redirect(o, to, dl) {
+export function redirect(o: RequestObject, to: string, dl?: boolean) {
 	if (dl !== null && dl !== undefined)
 		o.doLog = dl;
 	o.response.setHeader("Location", to);
@@ -497,7 +508,7 @@ function redirect(o, to, dl) {
 	};
 }
 
-function notFound(o, dl) {
+export function notFound(o: RequestObject, dl?: boolean) {
 	if (dl !== null && dl !== undefined)
 		o.doLog = dl;
 	throw {
@@ -506,7 +517,7 @@ function notFound(o, dl) {
 	};
 }
 
-function crudApi(...args) {
+export function crudApi(...args) {
 	let obj;
 	let options;
 	if (typeof args[0] === "object") {
@@ -534,7 +545,7 @@ function crudApi(...args) {
 		optionsMethodGen: false,
 		getForOneItemGen: true
 	}, options);
-	const res = {
+	const res: any = {
 		"...": options.pre
 	};
 	const get = {
@@ -626,7 +637,7 @@ function crudApi(...args) {
 	};
 }
 
-function printIPs(tabs = 0) {
+export function printIPs(tabs = 0) {
 	const ips = {
 		/*"IPv4": [],
 		"IPv6": []*/
@@ -634,7 +645,7 @@ function printIPs(tabs = 0) {
 	let strtbs = "";
 	while (tabs--)
 		strtbs += "\t";
-	const nets = os.networkInterfaces();
+	const nets = networkInterfaces();
 	for (const key in nets)
 		for (const ip of nets[key])
 			if (!ip.internal)
@@ -649,32 +660,8 @@ function printIPs(tabs = 0) {
 	}
 };
 
-exports.processRouteObj = processRouteObj;
-exports.createProcessor = createProcessor;
-exports.createSubServer = createSubServer;
-exports.loadRouteObj = loadRouteObj;
-exports.tools = tools;
-exports.args = args;
-exports.initRead = initRead;
-exports.file2response = file2response;
-exports.defaultServerStart = defaultServerStart;
-exports.fileAsResponse = fileAsResponse;
-exports.redirect = redirect;
-exports.notFound = notFound;
-exports.crudApi = crudApi;
-//exports.host = host;
-exports.setMime = m => mime = m, exports;
-exports.printIPs = printIPs;
-
-if (!("args" in process))
-	process.args = args;
-if (!("initRead" in console))
-	console.initRead = initRead;
-if (!("map2obj" in Array.prototype))
-	Array.prototype.map2obj = map2obj;
-
 if (module === require.main) {
-	console.log("SODS 0.15.5 \nargs:");
+	console.log("SODS 0.16.0 \nargs:");
 	console.log(args);
 	console.log("Initializing...");
 	defaultServerStart().then(() => {
