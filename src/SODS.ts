@@ -1,5 +1,4 @@
-import { createReadStream, PathLike, Stats } from "fs";
-import { readFile, stat } from "fs/promises";
+import { createReadStream, PathLike, ReadStream, Stats, promises as fsPromises } from "fs";
 import { createServer as createHttpServer, ServerResponse, IncomingMessage, OutgoingHttpHeaders, RequestListener } from "http";
 import { networkInterfaces } from "os";
 import * as mime from "mime";
@@ -8,7 +7,7 @@ import { ServerOptions, createServer as createHttpsServer } from "https";
 //const parrent = Symbol("parrent");
 
 export class RequestMessage extends IncomingMessage {
-	cookies: any;
+	cookies: Cookie[];
 	stringParams: any;
 	body: Promise<string>;
 }
@@ -19,7 +18,40 @@ export class RequestObject {
 	fpath: string;
 	queue: ((o: RequestObject, path: string) => void)[];
 	doLog: boolean;
+	storage: {
+		tokens: string[]
+	};
 };
+
+class Cookie {
+	name: string;
+	value: string;
+	expires?: Date;
+	maxAge?: number;
+	secure?: boolean;
+	httpOnly?: boolean;
+	domain?: string;
+	path?: string;
+	sameSite?: "Strict" | "Lax" | "None";
+	toString() {
+		let res = `${this.name}=${this.value}`;
+		if (this.expires)
+			res += "; Expires=" + this.expires.toUTCString();
+		if (this.maxAge)
+			res += "; Max-Age=" + this.maxAge;
+		if (this.domain)
+			res += "; Domain=" + this.domain;
+		if (this.path)
+			res += "; Path=" + this.path;
+		if (this.secure)
+			res += "; Secure";
+		if (this.httpOnly)
+			res += "; HttpOnly";
+		if (this.sameSite)
+			res += "; SameSite=" + this.sameSite;
+		return res;
+	}
+}
 
 type PortsArr = (number[] | number | "*")[];
 
@@ -74,9 +106,9 @@ export const tools = {
 	deepCopy: <T extends object>(obj: T): T => {
 		const res = new Object() as any;
 		for (const nm in obj) {
-			const v = obj[nm];
+			const v: any = obj[nm];
 			if (typeof v === "object")
-				res[nm] = tools.deepCopy(v as any);
+				res[nm] = tools.deepCopy(v);
 			else
 				res[nm] = v;
 		}
@@ -116,7 +148,7 @@ export function initConcoleProcessor(lineProc: (x: string) => any = (0, eval), {
 	});
 }
 
-async function processRequest(o: RequestObject, path: string, sect: object) {
+async function processRequest(o: RequestObject, path: string, sect: object): Promise<any> {
 	try {
 		if (sect) {
 			let proc;
@@ -180,77 +212,76 @@ async function processRequest(o: RequestObject, path: string, sect: object) {
 	}
 }
 
-export const createProcessor = (routeObj: object) => Object.assign((request: RequestMessage, response: ServerResponse) => {
-	let path = decodeURI(request.url);
-	const stringParams = {};
-	const spsi = path.indexOf('?');
-	if (spsi > 0) {
-		path.substr(spsi + 1).split('&').forEach(function (param) {
-			const splt = param.indexOf('=');
-			if (splt > 0)
-				stringParams[param.substr(0, splt)] = param.substr(splt + 1);
-			else
-				stringParams[param] = true;
-		});
-		path = path.substr(0, spsi);
-	}
-	request.stringParams = stringParams;
-	if (request.headers.cookie)
-		request.cookies = map2obj(request.headers.cookie.split(';'), (l => tools.split(l, "=", 2).map(l => l.trim())));
-	path = path.replace(pathNormalizeRegExp, "");
-	Object.defineProperty(request, "body", {
-		configurable: true,
-		enumerable: false,
-		get: async () => {
-			Object.defineProperty(request, "body", {
-				configurable: true,
-				enumerable: false,
-				value: new Promise((resolve, reject) => {
-					let body = "";
-					request.on("end", () => resolve(body));
-					request.on("error", reject);
-					request.on("data", data => body += data);
-				})
+export async function createProcessor(routeObj: object, storage: any) {
+	return Object.assign((request: RequestMessage, response: ServerResponse) => {
+		let path = decodeURI(request.url);
+		const stringParams = {};
+		const spsi = path.indexOf('?');
+		if (spsi > 0) {
+			path.substr(spsi + 1).split('&').forEach(function (param) {
+				const splt = param.indexOf('=');
+				if (splt > 0)
+					stringParams[param.substr(0, splt)] = param.substr(splt + 1);
+				else
+					stringParams[param] = true;
 			});
-			return request.body;
+			path = path.substr(0, spsi);
 		}
-	});
-	const startTime = tools.formatedTime;
-	const o = {
-		request: request,
-		response: response,
-		fpath: path,
-		queue: [],
-		doLog: true
-	};
-	processRequest(o, path, routeObj).catch(e => {
-		if (typeof e.code === "number") {
-			if (o.doLog && !e.usual) {
-				console.log(`${e.code} ${e.text}`);
+		request.stringParams = stringParams;
+		request.cookies = (request.headers.cookie
+			? request.headers.cookie.split(';').map(c => {
+				const ca = tools.split(c, "=", 2);
+				return {
+					name: ca[0].trim(),
+					value: ca[1].trim()
+				};
+			})
+			: []);
+		path = path.replace(pathNormalizeRegExp, "");
+		request.body = new Promise((resolve, reject) => {
+			let body = "";
+			request.on("end", () => resolve(body));
+			request.on("error", reject);
+			request.on("data", data => body += data);
+		});
+		const startTime = tools.formatedTime;
+		const o: RequestObject = {
+			request: request,
+			response: response,
+			fpath: path,
+			queue: [],
+			doLog: true,
+			storage: storage
+		};
+		processRequest(o, path, routeObj).catch(e => {
+			if (typeof e.code === "number") {
+				if (o.doLog && !e.usual) {
+					console.log(`${e.code} ${e.text}`);
+				}
+				response.writeHead(e.code, e.text);
+				return response.end();
 			}
-			response.writeHead(e.code, e.text);
-			return response.end();
-		}
-		if (o.doLog)
-			console.error(e);
-		try {
-			response.writeHead(500, "Internal Server Error");
-		}
-		finally {
+			if (o.doLog)
+				console.error(e);
 			try {
-				response.end();
+				response.writeHead(500, "Internal Server Error");
 			}
-			catch (e) { }
+			finally {
+				try {
+					response.end();
+				}
+				catch (e) { }
+			}
+		});
+		if (o.doLog) {
+			console.log(`${startTime} -> request ${request.method} "${path}" ${JSON.stringify(stringParams)}`);
+			response.on("close", () => console.log(`${startTime} - ${tools.formatedTime} -> closed ${request.method} "${path}" ${JSON.stringify(stringParams)}`));
+			response.on("finish", () => console.log(`${startTime} - ${tools.formatedTime} -> finished ${request.method} "${path}" ${JSON.stringify(stringParams)}`));
 		}
-	});
-	if (o.doLog) {
-		console.log(`${startTime} -> request ${request.method} "${path}" ${JSON.stringify(stringParams)}`);
-		response.on("close", () => console.log(`${startTime} - ${tools.formatedTime} -> closed ${request.method} "${path}" ${JSON.stringify(stringParams)}`));
-		response.on("finish", () => console.log(`${startTime} - ${tools.formatedTime} -> finished ${request.method} "${path}" ${JSON.stringify(stringParams)}`));
-	}
-}, {
-	changeRouteObj: o => routeObj = (typeof o === "string" ? loadRouteObj(o) : o)
-});
+	}, {
+		changeRouteObj: o => routeObj = (typeof o === "string" ? loadRouteObj(o) : o)
+	})
+};
 
 export function crt(processor: RequestListener, port = args.port, options?: ServOptions) {
 	const silense = options && options.silense;
@@ -282,14 +313,14 @@ export function crt(processor: RequestListener, port = args.port, options?: Serv
 	});
 }
 
-function processRouteObj(v): object {
+function processRouteObj(v: object | string): object {
 	return typeof v === "string"
 		? eval(v.startsWith('{') ? `(${v})` : v)
 		: tools.deepCopy(v);//convertStrings2FuncInObj(Object.assign({}, v));
 }
 
-export async function loadRouteObj(file) {
-	return processRouteObj(await readFile(file, "utf8"));
+export async function loadRouteObj(file: PathLike) {
+	return processRouteObj(await fsPromises.readFile(file, "utf8"));
 }
 
 function convertStrings2FuncInObj(obj) {
@@ -301,7 +332,7 @@ function convertStrings2FuncInObj(obj) {
 		}
 }
 
-export function _pipeFile(istream, ostream) {
+export function _pipeFile(istream: ReadStream, ostream: NodeJS.WritableStream): Promise<NodeJS.WritableStream> {
 	return new Promise((resolve, reject) => {
 		try {
 			istream.pipe(ostream, { end: false });
@@ -317,7 +348,7 @@ export function _pipeFile(istream, ostream) {
 
 export async function file2response(response: ServerResponse, path: string, ranges?: string | { start?: number, end?: number }[], type?: string, head?: OutgoingHttpHeaders, filestat?: Stats) {
 	if (!filestat)
-		filestat = await stat(path);
+		filestat = await fsPromises.stat(path);
 	if (!type)
 		type = mime.getType(path);
 	if (typeof ranges == "string") {
@@ -383,10 +414,10 @@ export function fileAsResponse(path: string, options?: { doLog?: boolean, hostin
 			if (dl !== null && dl !== undefined)
 				o.doLog = dl;
 			let fp = path + p;
-			let filestat = await stat(fp);
+			let filestat = await fsPromises.stat(fp);
 			if (options.hostingLike && filestat.isDirectory()) {
 				fp = fp + (fp.endsWith('/') ? "" : "/") + "index.html";
-				filestat = await stat(fp);
+				filestat = await fsPromises.stat(fp);
 			}
 			o.response.setHeader("Content-Type", typeof options.mime === "function" ? options.mime(p) : options.mime);
 			if (options.useRange && !o.request.headers.range)
@@ -417,12 +448,12 @@ export function getRoleByToken(token) {
 
 }
 
-export function authorized(_as, tokenName = "token", e1se = o => {
+export function authorized(_as, tokenName = "token", e1se = (o: RequestObject): void => {
 	throw { code: 401, text: "Unauthorized" };
 }) {
-	return o => {
-		if (o.cookies[tokenName]) {
-
+	return (o: RequestObject) => {
+		if (o.request.cookies[tokenName]) {
+			//o.storage.tokens.
 		} else
 			e1se(o);
 	};
@@ -431,7 +462,7 @@ export function authorized(_as, tokenName = "token", e1se = o => {
 export function authorization() {
 	return {
 		".": {
-			get: (o, path) => { }
+			get: (o: RequestObject, path: string) => { }
 		}
 	};
 }
@@ -487,7 +518,7 @@ export async function defaultServerStart(routeObj: string | object = "route.js",
 		httpPort = [[80], [8080], "*"];
 	if (typeof routeObj === "string")
 		routeObj = await loadRouteObj(routeObj);
-	const processor = createProcessor(routeObj);
+	const processor = await createProcessor(routeObj, "stor.json");
 	initConcoleProcessor(evalF);
 	const res: any = await createSubServer(processor, httpPort);
 	if (serverOptions) {
