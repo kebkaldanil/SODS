@@ -3,29 +3,38 @@ import { createServer as createHttpServer, ServerResponse, IncomingMessage, Outg
 import { networkInterfaces } from "os";
 import * as mime from "mime";
 import { ServerOptions, createServer as createHttpsServer } from "https";
+import { verbose } from "sqlite3";
 
 //const parrent = Symbol("parrent");
 
 export class RequestMessage extends IncomingMessage {
-	cookies: Cookie[];
-	stringParams: any;
+	cookies: ReceivedCookie[];
+	stringParams: NodeJS.ReadOnlyDict<string | boolean>;
 	body: Promise<string>;
+}
+
+export class ResponseMessage extends ServerResponse {
+	cookies: Cookie[];
 }
 
 export class RequestObject {
 	request: RequestMessage;
-	response: ServerResponse;
+	response: ResponseMessage;
 	fpath: string;
 	queue: ((o: RequestObject, path: string) => void)[];
 	doLog: boolean;
-	storage: {
-		tokens: string[]
-	};
+	bag: any;
 };
 
-class Cookie {
+export class ReceivedCookie {
 	name: string;
 	value: string;
+	toString() {
+		return `${this.name}=${this.value}`;
+	}
+}
+
+export class Cookie extends ReceivedCookie {
 	expires?: Date;
 	maxAge?: number;
 	secure?: boolean;
@@ -34,7 +43,7 @@ class Cookie {
 	path?: string;
 	sameSite?: "Strict" | "Lax" | "None";
 	toString() {
-		let res = `${this.name}=${this.value}`;
+		let res = super.toString();
 		if (this.expires)
 			res += "; Expires=" + this.expires.toUTCString();
 		if (this.maxAge)
@@ -52,6 +61,10 @@ class Cookie {
 		return res;
 	}
 }
+
+const o: NodeJS.Dict<"as"> = {
+	"sdd": "as"
+};
 
 type PortsArr = (number[] | number | "*")[];
 
@@ -103,8 +116,8 @@ export const tools = {
 		res.push(str);
 		return res;
 	},
-	deepCopy: <T extends object>(obj: T): T => {
-		const res = new Object() as any;
+	deepCopy: <T extends Object>(obj: T): T => {
+		const res: T = {} as any;
 		for (const nm in obj) {
 			const v: any = obj[nm];
 			if (typeof v === "object")
@@ -151,7 +164,7 @@ export function initConcoleProcessor(lineProc: (x: string) => any = (0, eval), {
 async function processRequest(o: RequestObject, path: string, sect: object): Promise<any> {
 	try {
 		if (sect) {
-			let proc;
+			let proc: Function;
 			if (typeof sect == "function")
 				proc = sect;
 			else {
@@ -212,10 +225,17 @@ async function processRequest(o: RequestObject, path: string, sect: object): Pro
 	}
 }
 
-export async function createProcessor(routeObj: object, storage: any) {
-	return Object.assign((request: RequestMessage, response: ServerResponse) => {
+export function createProcessor(routeObj: object) {
+	return Object.assign((request: RequestMessage, response: ResponseMessage) => {
+		const _writeHead = response.writeHead;
+		response.cookies = [];
+		response.writeHead = function (...args: any[]) {
+			if (this.cookies.length !== 0)
+				this.setHeader("Set-Cookie", this.cookies.map((v: Cookie) => v.toString()));
+			return _writeHead.call(this, ...args);
+		};
 		let path = decodeURI(request.url);
-		const stringParams = {};
+		const stringParams: NodeJS.Dict<string | boolean> = {};
 		const spsi = path.indexOf('?');
 		if (spsi > 0) {
 			path.substr(spsi + 1).split('&').forEach(function (param) {
@@ -251,7 +271,7 @@ export async function createProcessor(routeObj: object, storage: any) {
 			fpath: path,
 			queue: [],
 			doLog: true,
-			storage: storage
+			bag: {}
 		};
 		processRequest(o, path, routeObj).catch(e => {
 			if (typeof e.code === "number") {
@@ -402,18 +422,25 @@ export async function file2response(response: ServerResponse, path: string, rang
 	response.end();
 }
 
-export function fileAsResponse(path: string, options?: { doLog?: boolean, hostingLike?: boolean, useRange?: boolean, mime?: ((x: string) => string) | string, logErrors?: boolean }) {
+export function fileAsResponse(path: string, options?: {
+	doLog?: boolean,
+	hostingLike?: boolean,
+	useRange?: boolean,
+	mime?: ((x: string) => string) | string,
+	logErrors?: boolean,
+	logRanges?: boolean
+}) {
 	if (!path)
 		path = "/";
 	if (!path.endsWith('/'))
 		path += '/';
-	options = Object.assign({ useRange: true, mime: mime.getType, hostingLike: false, logErrors: false }, options);
+	options = Object.assign({ useRange: true, mime: mime.getType, hostingLike: false, logErrors: true, logRanges: false }, options);
 	const dl = options.doLog;
 	return async (o: RequestObject, p: string) => {
+		if (dl !== null && dl !== undefined)
+			o.doLog = dl;
+		let fp = path + p;
 		try {
-			if (dl !== null && dl !== undefined)
-				o.doLog = dl;
-			let fp = path + p;
 			let filestat = await fsPromises.stat(fp);
 			if (options.hostingLike && filestat.isDirectory()) {
 				fp = fp + (fp.endsWith('/') ? "" : "/") + "index.html";
@@ -426,6 +453,8 @@ export function fileAsResponse(path: string, options?: { doLog?: boolean, hostin
 			//temp
 			o.response.setHeader("Cache-Control", "no-cache");
 			o.response.setHeader("Access-Control-Allow-Origin", "*");
+			if (o.doLog && o.request.headers.range && !options.logRanges)
+				o.doLog = false;
 			//===========================
 			await file2response(o.response, fp, options.useRange && o.request.headers.range, undefined, undefined, filestat);
 		} catch (e) {
@@ -518,7 +547,7 @@ export async function defaultServerStart(routeObj: string | object = "route.js",
 		httpPort = [[80], [8080], "*"];
 	if (typeof routeObj === "string")
 		routeObj = await loadRouteObj(routeObj);
-	const processor = await createProcessor(routeObj, "stor.json");
+	const processor = createProcessor(routeObj);
 	initConcoleProcessor(evalF);
 	const res: any = await createSubServer(processor, httpPort);
 	if (serverOptions) {
@@ -668,22 +697,26 @@ export function crudApi(...args) {
 	};
 }
 
-export function printIPs(tabs = 0) {
-	const ips = {
-		/*"IPv4": [],
-		"IPv6": []*/
+export function printIPs(tabs = 0, printInternal: boolean = true) {
+	const ips: NodeJS.Dict<string[]> = {
+		//"IPv4": [],
+		//"IPv6": []
 	};
+	if (printInternal)
+		ips.Internal = [];
 	let strtbs = "";
 	while (tabs--)
 		strtbs += "\t";
 	const nets = networkInterfaces();
 	for (const key in nets)
-		for (const ip of nets[key])
-			if (!ip.internal)
-				if (ips[ip.family])
-					ips[ip.family].push(`${ip.address} (${key})`);
-				else
-					ips[ip.family] = [ip.address];
+		for (const ip of nets[key].sort((a, b) => a.family.localeCompare(b.family) || a.address.localeCompare(b.address)))
+			if (ip.internal) {
+				if (printInternal)
+					ips.Internal.push(`${ip.address} (${key})`);
+			} else if (ips[ip.family])
+				ips[ip.family].push(`${ip.address} (${key})`);
+			else
+				ips[ip.family] = [ip.address];
 	for (const key in ips) {
 		console.log(strtbs + key + ":");
 		for (const ip of ips[key])

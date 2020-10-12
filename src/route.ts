@@ -2,6 +2,7 @@ import * as fs from "fs";
 import { exec } from "child_process";
 import * as JsZip from "jszip";
 import { redirect, notFound, fileAsResponse, file2response, args, RequestObject } from "./SODS";
+import { verbose } from "sqlite3";
 const MAX_ZIP_SRC_SIZE = 4 * 1024 * 1024 * 1024;
 
 export default ({
