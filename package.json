@@ -19,10 +19,16 @@
   "homepage": "https://github.com/kebkaldanil/SODS#readme",
   "dependencies": {
     "jszip": "^3.4.0",
-    "mime": "^2.4.4"
+    "mime": "^2.4.4",
+    "sqlite3": "^5.0.0"
   },
   "devDependencies": {
     "@types/mime": "^2.0.3",
+<<<<<<< HEAD
     "@types/node": "^14.11.8"
+=======
+    "@types/node": "^14.11.1",
+    "@types/sqlite3": "^3.1.6"
+>>>>>>> 1ac7a9d41a9be568fcac2d9021fbd62bf46a7f5c
   }
 }
