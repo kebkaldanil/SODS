@@ -1,19 +1,36 @@
 import * as fs from "fs";
 import { exec } from "child_process";
 import * as JsZip from "jszip";
-import { redirect, notFound, fileAsResponse, file2response, args, RequestObject } from "./SODS";
+import { redirect, notFound, fileAsResponse, file2response, args, RequestObject, RouteObj, onError, current, fromThere, crudApi, sqlite3_dbAdapter, allAllowedMethods } from "./SODS";
 import { verbose } from "sqlite3";
 const MAX_ZIP_SRC_SIZE = 4 * 1024 * 1024 * 1024;
 
-export default ({
-	".": function (o: RequestObject, path: string) {
+const sqlite3 = verbose();
+const db = new sqlite3.Database(":memory:");
+db.serialize();
+db.run("create table students(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, age INT NOT NULL)");
+db.parallelize();
+
+class Student {
+	id: number;
+	name: string;
+	age: number;
+
+	constructor(name, age) {
+		this.name = name;
+		this.age = age;
+	}
+}
+
+const exp: RouteObj = ({
+	[current]: function (o: RequestObject, path: string) {
 		if (path === "") {
 			redirect(o, "/directory", false);
 		}
 		else
 			notFound(o, false);
 	},
-	"...": (o: RequestObject) => {
+	[fromThere]: (o: RequestObject) => {
 	},
 	"assets": fileAsResponse(args.assetsDir, { useRange: false, doLog: false, logErrors: false }),
 	"file": fileAsResponse(args.filesDir, { useRange: true, doLog: true, logErrors: true }),
@@ -90,12 +107,15 @@ export default ({
 		else
 			await file2response(response, args.assetsDir + "fs_v.html");
 	},
-	"..": (e: Error | {code: number}, o: RequestObject) => {
+	[onError]: (e: Error | {code: number}, o: RequestObject) => {
 		if ("code" in e && e.code / 100 % 10 === 4)
 			o.doLog = true;
 		throw e;
 	},
 	"test": "##<h3>test</h3>",
+	"students": crudApi(new sqlite3_dbAdapter<Student>(db, "students", "id"), {
+		allowedMethods: "*"
+	}),
 	"shutdown": (o: RequestObject) => {
 		exec("shutdown /s");
 		return "success";
@@ -105,3 +125,5 @@ export default ({
 		return "success";
 	}
 });
+
+export default exp;

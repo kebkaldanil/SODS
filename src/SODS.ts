@@ -3,9 +3,74 @@ import { createServer as createHttpServer, ServerResponse, IncomingMessage, Outg
 import { networkInterfaces } from "os";
 import * as mime from "mime";
 import { ServerOptions, createServer as createHttpsServer } from "https";
-import { verbose } from "sqlite3";
+import { Database } from "sqlite3";
+import { promisify } from "util";
 
 //const parrent = Symbol("parrent");
+
+type processFunction = <T extends MinimumTableObject>(o: RequestObject<T>, path: string) => any | Promise<any>;
+
+export interface dbAdapter<T extends {}> {
+	table: string;
+	getByKey(key: number | string, pk?: string): Promise<T>;
+	getWhere(condition: string, limit?: number, skip?: number): Promise<T[]>;
+	insert(obj: T | T[]): Promise<void>;
+	updateWhere(obj: T, where: string, editedProps: (Extract<keyof T, string>)[]): Promise<void>;
+	update(obj: T, key: string | number, editedProps: (Extract<keyof T, string>)[], pk?: string): Promise<void>;
+	deleteWhere(where: string): Promise<void>;
+	delete(key: string | number, pk?: string): Promise<void>;
+
+	run?(sql: string): Promise<any>;
+	db?: any;
+}
+
+export class sqlite3_dbAdapter<T extends {}> implements dbAdapter<T> {
+	db: Database;
+	private dbAll: (sql: string) => Promise<T[]>;
+	private dbGet: (sql: string) => Promise<any>;
+	private dbRun: (sql: string) => Promise<void>;
+	protected pk?: string;
+	table: string;
+
+	constructor(db: Database, table: string, pk?: string) {
+		this.db = db;
+		this.dbAll = promisify(db.all).bind(db);
+		this.dbGet = promisify(db.get).bind(db);
+		this.dbRun = promisify(db.run).bind(db);
+		this.pk = pk;
+		this.table = table;
+	}
+	async getByKey(key: string | number, pk?: string): Promise<T> {
+		if (!pk)
+			pk = (this.pk ? this.pk : this.pk = await this.dbGet(`pragma table_info(${this.table}) where pk != 0`));
+		return this.dbGet(`select * from ${this.table} where ${pk} = ${key}`);
+	}
+	async getWhere(condition: string, limit?: number, skip?: number): Promise<T[]> {
+		return this.dbAll(`select * from ${this.table} where ${condition}`);
+	}
+	async insert(obj: T | T[]) {
+		if (!Array.isArray(obj))
+			obj = [obj];
+		const keys: (keyof T)[] = Object.keys(obj[0]) as any;
+		await this.dbRun(`insert into ${this.table} (${keys.join()}) values ${obj.map(v => `(${keys.map(k => JSON.stringify(v[k], (k, v) => typeof v === "object" ? null : v)).join()})`).join()}`);
+	}
+	async updateWhere(obj: T, where: string, editedProps: (Extract<keyof T, string>)[]) {
+		await this.dbRun(`update ${this.table} where ${where} set ${editedProps.map(k => `${k} = ${JSON.stringify(obj[k])}`).join()}`);
+	}
+	async update(obj: T, key: string | number, editedProps: (Extract<keyof T, string>)[], pk?: string) {
+		if (!pk)
+			pk = (this.pk ? this.pk : this.pk = await this.dbGet(`pragma table_info(${this.table}) where pk != 0`));
+		await this.updateWhere(obj, `${this.pk} = ${key}`, editedProps);
+	}
+	async deleteWhere(where: string): Promise<void> {
+		await this.dbRun(`delete ${this.table} where ${where}`);
+	}
+	async delete(key: string | number, pk?: string): Promise<void> {
+		if (!pk)
+			pk = (this.pk ? this.pk : this.pk = await this.dbGet(`pragma table_info(${this.table}) where pk != 0`));
+		await this.deleteWhere(`${this.pk} = ${key}`);
+	}
+}
 
 export class RequestMessage extends IncomingMessage {
 	cookies: ReceivedCookie[];
@@ -17,13 +82,18 @@ export class ResponseMessage extends ServerResponse {
 	cookies: Cookie[];
 }
 
-export class RequestObject {
+export class MinimumTableObject {
+	token: string;
+	expires: number;
+};
+
+export class RequestObject<T = MinimumTableObject> {
 	request: RequestMessage;
 	response: ResponseMessage;
 	fpath: string;
-	queue: ((o: RequestObject, path: string) => void)[];
+	queue: ((o: RequestObject<T>, path: string) => void)[];
 	doLog: boolean;
-	bag: any;
+	dbAdapter: dbAdapter<T>;
 };
 
 export class ReceivedCookie {
@@ -62,10 +132,6 @@ export class Cookie extends ReceivedCookie {
 	}
 }
 
-const o: NodeJS.Dict<"as"> = {
-	"sdd": "as"
-};
-
 type PortsArr = (number[] | number | "*")[];
 
 type ServOptions = {
@@ -73,6 +139,26 @@ type ServOptions = {
 	mode: "http" | "https",
 	serverOptions?: ServerOptions
 };
+
+export const onError = Symbol("Error route");
+export const current = Symbol("Current path");
+export const fromThere = Symbol("Subpaths only");
+
+export type CurrentRouteObj = processFunction | {
+	[method: string]: processFunction,
+	HEAD?: processFunction,
+	GET?: processFunction,
+	POST?: processFunction,
+	PUT?: processFunction,
+	DELETE?: processFunction,
+	OPTIONS?: processFunction
+};
+
+export type RouteObj = {
+	[current]?: CurrentRouteObj,
+	[onError]?: (e: Error | { code: number }, o: RequestObject) => any,
+	[fromThere]?: <T extends MinimumTableObject>(o: RequestObject<T>, path: string, declaredPath: string) => any | Promise<any>
+} & NodeJS.Dict<RouteObj> | string | processFunction;
 
 export const tools = {
 	time: (strings: TemplateStringsArray, ...params: any[]) => {
@@ -116,10 +202,10 @@ export const tools = {
 		res.push(str);
 		return res;
 	},
-	deepCopy: <T extends Object>(obj: T): T => {
-		const res: T = {} as any;
+	deepCopy: <T extends NodeJS.Dict<any>>(obj: T): T => {
+		const res: any = {};
 		for (const nm in obj) {
-			const v: any = obj[nm];
+			const v = obj[nm];
 			if (typeof v === "object")
 				res[nm] = tools.deepCopy(v);
 			else
@@ -161,19 +247,19 @@ export function initConcoleProcessor(lineProc: (x: string) => any = (0, eval), {
 	});
 }
 
-async function processRequest(o: RequestObject, path: string, sect: object): Promise<any> {
+async function processRequest<T extends MinimumTableObject>(o: RequestObject<T>, path: string, sect: RouteObj): Promise<any> {
 	try {
 		if (sect) {
-			let proc: Function;
+			let proc: processFunction;
 			if (typeof sect == "function")
 				proc = sect;
 			else {
 				let si = path.indexOf('/');
 				const routepart = si >= 0 ? path.slice(0, si) : path;
 				if (sect[routepart]) {
-					const dab = sect["..."] && typeof sect["..."] === "function";
+					const dab = sect[fromThere] && typeof sect[fromThere] === "function";
 					if (dab)
-						o.queue.push((o, p) => sect["..."](o, p, path)) - 1;
+						o.queue.push((o, p) => sect[fromThere](o, p, path)) - 1;
 					const res = await processRequest(o, path.substring(routepart.length + 1), sect[routepart]);
 					if (res)
 						return res;
@@ -182,10 +268,10 @@ async function processRequest(o: RequestObject, path: string, sect: object): Pro
 				}
 				if (sect[o.request.method])
 					proc = sect[o.request.method];
-				else if (sect["."]) {
-					sect = sect['.'];
-					if (sect["..."] && typeof sect["..."] === "function") {
-						o.queue.push((o, p) => sect["..."](o, p, path));
+				else if (sect[current]) {
+					sect = sect[current];
+					if (sect[current] && typeof sect[fromThere] === "function") {
+						o.queue.push((o, p) => sect[fromThere](o, p, path));
 					}
 					if (typeof sect === "function")
 						proc = sect;
@@ -218,14 +304,14 @@ async function processRequest(o: RequestObject, path: string, sect: object): Pro
 		return false;
 	}
 	catch (e) {
-		if (sect[".."])
-			sect[".."](e, o, o.fpath.slice(0, path.length - 1));
+		if (sect[onError])
+			sect[onError](e, o, o.fpath.slice(0, path.length - 1));
 		else
 			throw e;
 	}
 }
 
-export function createProcessor(routeObj: object) {
+export function createProcessor<T extends MinimumTableObject = MinimumTableObject>(routeObj: RouteObj, dbAdapter: dbAdapter<T>) {
 	return Object.assign((request: RequestMessage, response: ResponseMessage) => {
 		const _writeHead = response.writeHead;
 		response.cookies = [];
@@ -265,13 +351,13 @@ export function createProcessor(routeObj: object) {
 			request.on("data", data => body += data);
 		});
 		const startTime = tools.formatedTime;
-		const o: RequestObject = {
+		const o: RequestObject<T> = {
 			request: request,
 			response: response,
 			fpath: path,
 			queue: [],
 			doLog: true,
-			bag: {}
+			dbAdapter: dbAdapter
 		};
 		processRequest(o, path, routeObj).catch(e => {
 			if (typeof e.code === "number") {
@@ -333,13 +419,13 @@ export function crt(processor: RequestListener, port = args.port, options?: Serv
 	});
 }
 
-function processRouteObj(v: object | string): object {
+function processRouteObj(v: RouteObj | string): RouteObj {
 	return typeof v === "string"
 		? eval(v.startsWith('{') ? `(${v})` : v)
 		: tools.deepCopy(v);//convertStrings2FuncInObj(Object.assign({}, v));
 }
 
-export async function loadRouteObj(file: PathLike) {
+export async function loadRouteObj(file: PathLike): Promise<RouteObj> {
 	return processRouteObj(await fsPromises.readFile(file, "utf8"));
 }
 
@@ -490,7 +576,7 @@ export function authorized(_as, tokenName = "token", e1se = (o: RequestObject): 
 
 export function authorization() {
 	return {
-		".": {
+		[current]: {
 			get: (o: RequestObject, path: string) => { }
 		}
 	};
@@ -537,7 +623,7 @@ export async function createSubServer(processor: RequestListener, ports: PortsAr
 	}
 }
 
-export async function defaultServerStart(routeObj: string | object = "route.js", evalF = eval, serverOptions?: ServerOptions, httpPort?: PortsArr | number, httpsPort?: PortsArr | number) {
+export async function defaultServerStart(routeObj: string | RouteObj = "route.js", evalF = (0, eval), serverOptions?: ServerOptions, httpPort?: PortsArr | number, httpsPort?: PortsArr | number) {
 	if (serverOptions && (typeof serverOptions !== "object" || Array.isArray(serverOptions) && !httpPort)) {
 		httpPort = serverOptions;
 		serverOptions = undefined;
@@ -547,7 +633,7 @@ export async function defaultServerStart(routeObj: string | object = "route.js",
 		httpPort = [[80], [8080], "*"];
 	if (typeof routeObj === "string")
 		routeObj = await loadRouteObj(routeObj);
-	const processor = createProcessor(routeObj);
+	const processor = createProcessor(routeObj, null);
 	initConcoleProcessor(evalF);
 	const res: any = await createSubServer(processor, httpPort);
 	if (serverOptions) {
@@ -558,7 +644,7 @@ export async function defaultServerStart(routeObj: string | object = "route.js",
 	return res;
 }
 
-export function redirect(o: RequestObject, to: string, dl?: boolean) {
+export function redirect<T extends MinimumTableObject>(o: RequestObject<T>, to: string, dl?: boolean) {
 	if (dl !== null && dl !== undefined)
 		o.doLog = dl;
 	o.response.setHeader("Location", to);
@@ -568,7 +654,7 @@ export function redirect(o: RequestObject, to: string, dl?: boolean) {
 	};
 }
 
-export function notFound(o: RequestObject, dl?: boolean) {
+export function notFound<T extends MinimumTableObject>(o: RequestObject<T>, dl?: boolean) {
 	if (dl !== null && dl !== undefined)
 		o.doLog = dl;
 	throw {
@@ -576,6 +662,94 @@ export function notFound(o: RequestObject, dl?: boolean) {
 		text: "Not found"
 	};
 }
+
+type allowedMethods = "head" | "get" | "post" | "put" | "delete" | "options";
+export const defaultAllowedMethods: Set<allowedMethods> = new Set(["head", "get", "options"]);
+export const allAllowedMethods: Set<allowedMethods> = new Set(["head", "get", "post", "put", "delete", "options"]);
+
+export const crudApiSimpleOptions = {
+	default: <T extends {}>(allowedMethods: Set<allowedMethods | string> | "*" = "*") => ({
+		allowedMethods,
+		getNullPathFun(o: RequestObject<T>, getP: NodeJS.Dict<string | boolean>) {
+			//o.dbAdapter.get;
+		}
+	})
+};
+
+export function crudApi<T extends {}>(dbAdapter: dbAdapter<T>, options?: {
+	allowedMethods?: Set<allowedMethods | string> | "*";
+	allowedOrigin?: string | string[];
+	allowedHeaders?: string[] | "*";
+	getNullPathFun?(o: RequestObject<T>, getP: NodeJS.Dict<string | boolean>): any;
+	getNotNullPathFun?(o: RequestObject<T>, path: string): any;
+	primiryKey?: string;
+}, aditionalMethodsHandlers?: CurrentRouteObj) {
+	options = Object.assign<typeof options, typeof options>({
+		allowedMethods: defaultAllowedMethods,
+		allowedHeaders: "*",
+		allowedOrigin: "*"
+	}, options);
+	const allowedHeaders = typeof options.allowedHeaders === "string" ? options.allowedHeaders : options.allowedHeaders.join();
+	const allowedMethods = typeof options.allowedMethods === "string" ? options.allowedMethods : Array.from(options.allowedMethods).join();
+	const res: RouteObj = {
+		[fromThere](o) {
+			o.response.setHeader("Access-Control-Allow-Origin", Array.isArray(options.allowedOrigin) ?
+				(o.request.headers.origin && options.allowedOrigin.includes(o.request.headers.origin) ?
+					o.request.headers.origin
+					: options.allowedOrigin[0])
+				: options.allowedOrigin);
+			o.response.setHeader("Access-Control-Allow-Headers", allowedHeaders);
+			o.response.setHeader("Access-Control-Allow-Methods", allowedMethods);
+		}
+	};
+	const primaryKey = options.primiryKey;
+	const cur: CurrentRouteObj = res[current] = {};
+	for (let method of allowedMethods === "*" ? allAllowedMethods : allowedMethods)
+		switch (method = method.toUpperCase()) {
+			case "GET":
+				cur[method] = function (o, path) {
+					return dbAdapter.getByKey(path, primaryKey);
+				};
+				break;
+			case "POST":
+				cur[method] = async function (o, path) {
+					if (path === "")
+						return dbAdapter.insert(JSON.parse(await o.request.body));
+					else
+						notFound(o);
+				};
+				break;
+			case "PUT":
+				cur[method] = async function (o, path) {
+					const obj = JSON.parse(await o.request.body);
+					return dbAdapter.update(obj, path, Object.keys(obj) as any, primaryKey);
+				};
+				break;
+			case "DELETE":
+				cur[method] = function (o, path) {
+					return dbAdapter.delete(path, primaryKey);
+				};
+				break;
+			case "HEAD":
+			case "OPTIONS":
+			default:
+				cur[method] = function () { };
+		}
+	return Object.assign(res, aditionalMethodsHandlers);
+}
+
+/*export function crudApi<T extends MinimumTableObject>(handlers: {
+	get?(path: string, o: RequestObject<T>): any;
+	getAll?(o: RequestObject<T>): any;
+	post?(): any;
+	put?(): any;
+	delete?(): any;
+	options?(): any;
+}, options?: {
+	pre?(o: RequestObject<T>): any;
+	optionsMethodGen?: boolean;
+	getForOneItemGen?: boolean;
+}): RouteObj;
 
 export function crudApi(...args) {
 	let obj;
@@ -606,7 +780,7 @@ export function crudApi(...args) {
 		getForOneItemGen: true
 	}, options);
 	const res: any = {
-		"...": options.pre
+		[fromThere]: options.pre
 	};
 	const get = {
 		all: null,
@@ -693,9 +867,9 @@ export function crudApi(...args) {
 		allow.push("OPTIONS");
 	}
 	return {
-		".": res
+		[current]: res
 	};
-}
+}*/
 
 export function printIPs(tabs = 0, printInternal: boolean = true) {
 	const ips: NodeJS.Dict<string[]> = {
