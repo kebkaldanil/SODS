@@ -1,8 +1,8 @@
 import * as fs from "fs";
 import { exec } from "child_process";
 import * as JsZip from "jszip";
-import { redirect, notFound, fileAsResponse, file2response, args, RequestObject, RouteObj, onError, current, fromThere, crudApi, sqlite3_dbAdapter, allAllowedMethods } from "./SODS";
-import { verbose } from "sqlite3";
+import { redirect, notFound, fileAsResponse, file2response, args, RequestObject, RouteObj, onError, current, fromThere, sqlite3_dbAdapter, crud } from "./SODS";
+import { Database, verbose } from "sqlite3";
 const MAX_ZIP_SRC_SIZE = 4 * 1024 * 1024 * 1024;
 
 const sqlite3 = verbose();
@@ -22,7 +22,9 @@ class Student {
 	}
 }
 
-const exp: RouteObj = ({
+const dbaStudents = new sqlite3_dbAdapter(db, "students", "id");
+
+const exp: RouteObj = {
 	[current]: function (o: RequestObject, path: string) {
 		if (path === "") {
 			redirect(o, "/directory", false);
@@ -32,9 +34,9 @@ const exp: RouteObj = ({
 	},
 	[fromThere]: (o: RequestObject) => {
 	},
-	"assets": fileAsResponse(args.assetsDir, { useRange: false, doLog: false, logErrors: false }),
-	"file": fileAsResponse(args.filesDir, { useRange: true, doLog: true, logErrors: true }),
-	"directory": async ({request, response}: RequestObject, path) => {
+	"assets": fileAsResponse(typeof args.assetsDir === "string" ? args.assetsDir : "", { useRange: false, doLog: false, logErrors: false }),
+	"file": fileAsResponse(typeof args.filesDir === "string" ? args.filesDir : "", { useRange: true, doLog: true, logErrors: true }),
+	"directory": async ({ request, response }: RequestObject, path) => {
 		const filesRoot = `${args.filesDir}${path}/`;
 		if (request.stringParams.query === "dir" || request.headers.query === "dir")
 			return new Promise((resolve, reject) => {
@@ -58,9 +60,9 @@ const exp: RouteObj = ({
 			let src_size = 0;
 
 			await addDirs(zip, filesRoot);
-			const tmpname = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString(36);
+			//const tmpname = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString(36);
 			response.setHeader("Content-Type", "application/zip");
-			zip.generateNodeStream({ compression: "DEFLATE", compressionOptions: { level: 6 } }).pipe(response).on("close", () => fs.unlink(tmpname, () => { }));
+			zip.generateNodeStream({ compression: "DEFLATE", compressionOptions: { level: 3 } }).pipe(response);//.on("close", () => fs.unlink(tmpname, () => { }));
 			/*zip.generateNodeStream({ compression: "DEFLATE", compressionOptions: { level: 6 } }).pipe(fs.createWriteStream(tmpname)).on("finish", () => 
 				fs.createReadStream(tmpname).pipe(o.response).on("close", () => fs.unlink(tmpname, () => { })));*/
 
@@ -107,15 +109,11 @@ const exp: RouteObj = ({
 		else
 			await file2response(response, args.assetsDir + "fs_v.html");
 	},
-	[onError]: (e: Error | {code: number}, o: RequestObject) => {
+	[onError]: (e: Error | { code: number }, o: RequestObject) => {
 		if ("code" in e && e.code / 100 % 10 === 4)
 			o.doLog = true;
 		throw e;
 	},
-	"test": "##<h3>test</h3>",
-	"students": crudApi(new sqlite3_dbAdapter<Student>(db, "students", "id"), {
-		allowedMethods: "*"
-	}),
 	"shutdown": (o: RequestObject) => {
 		exec("shutdown /s");
 		return "success";
@@ -123,7 +121,25 @@ const exp: RouteObj = ({
 	"hybernate": (o: RequestObject) => {
 		exec("shutdown /h");
 		return "success";
-	}
-});
+	},
+	"students": new crud.Builder()
+		.getRoot(() => `<form method="post" action=""><div>Name:<input name="name"></div><div>Age:<input name="age"></div><button type="submit">Submit</button></form>` as any)
+		.get(path => path === "all" && (dbaStudents as any).dbAll("select * from students"))
+		.get(path => dbaStudents.getByKey(path))
+		.postForm((path, post, o) => {
+			dbaStudents.insert(post);
+			o.response.setHeader("Location", "student_created");
+			throw {code: 301};
+		})
+		.delete(index => dbaStudents.delete(index))
+		.build(),
+	"student_created": {
+		GET: o => redirect(o, "students")
+	},
+	"fallout_easy_hack": fileAsResponse("fallout 3&4 easy hack", {
+		hostingLike: true,
+		useRange: false
+	})
+};
 
 export default exp;

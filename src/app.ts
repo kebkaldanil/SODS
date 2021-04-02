@@ -1,8 +1,10 @@
 import { readFileSync, existsSync, mkdirSync } from "fs";
 import * as SODS from "./SODS";
 
-SODS.args.assetsDir = SODS.args.assetsDir || "assets/";
-SODS.args.filesDir = SODS.args.filesDir || "files/";
+if (typeof SODS.args.assetsDir !== "string")
+	SODS.args.assetsDir = "assets/";
+if (typeof SODS.args.filesDir !== "string")
+	SODS.args.filesDir = "files/";
 if (!SODS.args.assetsDir.endsWith('/'))
 	SODS.args.assetsDir += '/';
 if (!SODS.args.filesDir.endsWith('/'))
@@ -23,12 +25,13 @@ catch (e) { }
 
 if (!existsSync(SODS.args.filesDir))
 	mkdirSync(SODS.args.filesDir, { recursive: true });
+function tmp(l) {
+	return eval(l);
+}
 
 (async () => {
 
-	const servers = await SODS.defaultServerStart(route, function (l) {
-		return eval(l);
-	}, httpsCert, [[80], [8080], '*'], [[443], [8443], '*']);
+	const servers = await SODS.defaultServerStart(route, tmp, httpsCert, [[80], [8080], '*'], [[443], [8443], '*']);
 
 	/*for (const port in servers) {
 		if (port !== "processor") {
@@ -40,15 +43,6 @@ if (!existsSync(SODS.args.filesDir))
 			});
 		}
 	}*/
-
-	const changeRouteObj = obj => {
-		servers.processor.changeRouteObj(obj);
-	};
-
-	const changeFilesDir = (dir, onObj = "route.js") => {
-		SODS.args.filesDir = dir;
-		changeRouteObj(onObj);
-	};
 
 	console.log("\nLocal IPs:");
 	SODS.printIPs(1);

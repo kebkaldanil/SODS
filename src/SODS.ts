@@ -1,5 +1,5 @@
 import { createReadStream, PathLike, ReadStream, Stats, promises as fsPromises } from "fs";
-import { createServer as createHttpServer, ServerResponse, IncomingMessage, OutgoingHttpHeaders, RequestListener } from "http";
+import { createServer as createHttpServer, ServerResponse, IncomingMessage, OutgoingHttpHeaders, RequestListener, Server } from "http";
 import { networkInterfaces } from "os";
 import * as mime from "mime";
 import { ServerOptions, createServer as createHttpsServer } from "https";
@@ -8,15 +8,16 @@ import { promisify } from "util";
 
 //const parrent = Symbol("parrent");
 
-type processFunction = <T extends MinimumTableObject>(o: RequestObject<T>, path: string) => any | Promise<any>;
+type processFunction = (o: RequestObject, path: string) => any | Promise<any>;
 
-export interface dbAdapter<T extends {}> {
+export interface dbAdapter {
 	table: string;
-	getByKey(key: number | string, pk?: string): Promise<T>;
-	getWhere(condition: string, limit?: number, skip?: number): Promise<T[]>;
-	insert(obj: T | T[]): Promise<void>;
-	updateWhere(obj: T, where: string, editedProps: (Extract<keyof T, string>)[]): Promise<void>;
-	update(obj: T, key: string | number, editedProps: (Extract<keyof T, string>)[], pk?: string): Promise<void>;
+	getByKey(key: number | string, pk?: string): Promise<any>;
+	getWhere(condition: string, limit?: number, skip?: number): Promise<any[]>;
+	insert(obj: any): Promise<void>;
+	insert(obj: any[]): Promise<void>;
+	updateWhere(obj: any, where: string, editedProps: string[]): Promise<void>;
+	update(obj: any, key: string | number, editedProps: string[], pk?: string): Promise<void>;
 	deleteWhere(where: string): Promise<void>;
 	delete(key: string | number, pk?: string): Promise<void>;
 
@@ -24,9 +25,9 @@ export interface dbAdapter<T extends {}> {
 	db?: any;
 }
 
-export class sqlite3_dbAdapter<T extends {}> implements dbAdapter<T> {
+export class sqlite3_dbAdapter implements dbAdapter {
 	db: Database;
-	private dbAll: (sql: string) => Promise<T[]>;
+	private dbAll: (sql: string) => Promise<any[]>;
 	private dbGet: (sql: string) => Promise<any>;
 	private dbRun: (sql: string) => Promise<void>;
 	protected pk?: string;
@@ -40,24 +41,24 @@ export class sqlite3_dbAdapter<T extends {}> implements dbAdapter<T> {
 		this.pk = pk;
 		this.table = table;
 	}
-	async getByKey(key: string | number, pk?: string): Promise<T> {
+	async getByKey(key: string | number, pk?: string): Promise<any> {
 		if (!pk)
 			pk = (this.pk ? this.pk : this.pk = await this.dbGet(`pragma table_info(${this.table}) where pk != 0`));
 		return this.dbGet(`select * from ${this.table} where ${pk} = ${key}`);
 	}
-	async getWhere(condition: string, limit?: number, skip?: number): Promise<T[]> {
+	async getWhere(condition: string, limit?: number, skip?: number): Promise<any[]> {
 		return this.dbAll(`select * from ${this.table} where ${condition}`);
 	}
-	async insert(obj: T | T[]) {
+	async insert(obj: any) {
 		if (!Array.isArray(obj))
 			obj = [obj];
-		const keys: (keyof T)[] = Object.keys(obj[0]) as any;
+		const keys: string[] = Object.keys(obj[0]) as any;
 		await this.dbRun(`insert into ${this.table} (${keys.join()}) values ${obj.map(v => `(${keys.map(k => JSON.stringify(v[k], (k, v) => typeof v === "object" ? null : v)).join()})`).join()}`);
 	}
-	async updateWhere(obj: T, where: string, editedProps: (Extract<keyof T, string>)[]) {
+	async updateWhere(obj: any, where: string, editedProps: string[]) {
 		await this.dbRun(`update ${this.table} where ${where} set ${editedProps.map(k => `${k} = ${JSON.stringify(obj[k])}`).join()}`);
 	}
-	async update(obj: T, key: string | number, editedProps: (Extract<keyof T, string>)[], pk?: string) {
+	async update(obj: any, key: string | number, editedProps: string[], pk?: string) {
 		if (!pk)
 			pk = (this.pk ? this.pk : this.pk = await this.dbGet(`pragma table_info(${this.table}) where pk != 0`));
 		await this.updateWhere(obj, `${this.pk} = ${key}`, editedProps);
@@ -80,20 +81,19 @@ export class RequestMessage extends IncomingMessage {
 
 export class ResponseMessage extends ServerResponse {
 	cookies: Cookie[];
-}
+}/*
 
 export class MinimumTableObject {
 	token: string;
 	expires: number;
-};
+};*/
 
-export class RequestObject<T = MinimumTableObject> {
+export class RequestObject {
 	request: RequestMessage;
 	response: ResponseMessage;
 	fpath: string;
-	queue: ((o: RequestObject<T>, path: string) => void)[];
+	queue: ((o: RequestObject, path: string) => void)[];
 	doLog: boolean;
-	dbAdapter: dbAdapter<T>;
 };
 
 export class ReceivedCookie {
@@ -143,6 +143,7 @@ type ServOptions = {
 export const onError = Symbol("Error route");
 export const current = Symbol("Current path");
 export const fromThere = Symbol("Subpaths only");
+export const resultProcessor = Symbol("Callback for return values");
 
 export type CurrentRouteObj = processFunction | {
 	[method: string]: processFunction,
@@ -157,12 +158,13 @@ export type CurrentRouteObj = processFunction | {
 export type RouteObj = {
 	[current]?: CurrentRouteObj,
 	[onError]?: (e: Error | { code: number }, o: RequestObject) => any,
-	[fromThere]?: <T extends MinimumTableObject>(o: RequestObject<T>, path: string, declaredPath: string) => any | Promise<any>
+	[fromThere]?: (o: RequestObject, path: string, declaredPath: string) => any | Promise<any>,
+	[resultProcessor]?: (ret: any, o: RequestObject) => any
 } & NodeJS.Dict<RouteObj> | string | processFunction;
 
-export const tools = {
-	time: (strings: TemplateStringsArray, ...params: any[]) => {
-		var res = "";
+class Tools {
+	time(strings: TemplateStringsArray, ...params: any[]) {
+		let res = "";
 		let i = 0;
 		while (i < params.length) {
 			const tmp = params[i];
@@ -170,18 +172,26 @@ export const tools = {
 			i++;
 		}
 		return res + strings[i];
-	},
-	_lengthOpti: (length: number, be: number) => {
+	}
+	_lengthOpti(length: number, be: number) {
 		const bs = "" + Math.trunc(be);
 		return "000000000000".slice(12 + bs.length - length) + bs;
-	},
+	}
 	get formatedTime() {
 		const p = new Date();
 		return tools.time`${p.getHours()}:${p.getMinutes()}:${p.getSeconds()}.${tools._lengthOpti(3, p.getMilliseconds())}`;
-	},
-	_rand: (start: number, lngth: number) => Math.floor(Math.random() * lngth + start),
-	random: (start: number, end: number) => tools._rand(start, end - start),
-	split: (str: string, separator: string = "", count: number = -1) => {
+	}
+	_rand(start: number, lngth: number) {
+		return Math.floor(Math.random() * lngth + start);
+	}
+	random(start: number, end: number) {
+		return tools._rand(start, end - start);
+	}
+	split(str: string, separator: string, count: 2, min?: false): [string, string];
+	split<T extends number>(str: string, separator: string, count: T, min?: false): string[] & { length: T };
+	split(str: string, separator: string, count: number, min: true): string[];
+	split(str: string, separator?: string, count?: -1): string[];
+	split(str: string, separator: string = "", count: number = -1, min = false) {
 		if (count < 0)
 			return str.split(separator);
 		if (count === 0)
@@ -189,20 +199,23 @@ export const tools = {
 		str = "" + str;
 		if (count === 1)
 			return [str];
-		const res: string[] = [];
+		const res: string[] = min ? [] : Array.from({ length: count });
+		let i = 0;
 		while (count !== 1) {
 			count--;
 			separator = "" + separator;
 			const si = str.indexOf(separator);
 			if (si < 0)
 				break;
-			res.push(str.slice(0, si));
+			res[i++] = str.slice(0, si);
 			str = str.slice(si + 1);
 		}
-		res.push(str);
+		if (i + 1 !== res.length)
+			throw Error("");
+		res[i] = str;
 		return res;
-	},
-	deepCopy: <T extends NodeJS.Dict<any>>(obj: T): T => {
+	}
+	deepCopy<T extends NodeJS.Dict<any>>(obj: T): T {
 		const res: any = {};
 		for (const nm in obj) {
 			const v = obj[nm];
@@ -213,22 +226,39 @@ export const tools = {
 		}
 		return res;
 	}
+	map2obj<T1, T2>(arr: T1[], l: (l: T1) => [T1, T2], throwable: Error | { code: number }): NodeJS.Dict<T2>;
+	map2obj<T1, T2>(arr: T1[], l: (l: T1) => [T1, T2]): NodeJS.Dict<T2 | boolean>;
+	map2obj(arr: string[]): NodeJS.Dict<string | boolean>;
+	map2obj(arr: string[], throwable: Error | { code: number }): NodeJS.Dict<string>;
+	map2obj(arr: any[], l: any = (l: any) => tools.split(l, '=', 2), throwable?: any) {
+		const res = {};
+		if (!(typeof l === "function" || l instanceof Function)) {
+			throwable = l;
+			l = (l: any) => tools.split(l, '=', 2);
+		}
+		arr.forEach(s => {
+			const a = l(s);
+			if (a && a.length > 0)
+				if (a.length < 2)
+					if (throwable)
+						throw throwable;
+					else
+						res[a[0]] = true;
+				else
+					res[a[0]] = a[1];
+			else if (throwable)
+				throw throwable;
+		});
+		return res;
+	}
 }
+export const tools = new Tools();
 
-function map2obj(arr: string[], l = (l: string) => tools.split(l, '=', 2)) {
-	const res: any = {};
-	arr.forEach(s => {
-		const a = l(s);
-		if (a && a.length > 0)
-			res[a[0]] = (a.length < 2 ? true : a[1]);
-	});
-	return res;
-}
 
 const pathNormalizeRegExp = /^\/+|\/+$|\/+(?=\/)/g;
 
 let inpLine = "";
-export const args = map2obj(process.argv.slice(2));
+export const args = tools.map2obj(process.argv.slice(2));
 
 export function initConcoleProcessor(lineProc: (x: string) => any = (0, eval), { functionRun = true, logNulls = false } = {}) {
 	process.stdin.setEncoding('utf8');
@@ -247,7 +277,7 @@ export function initConcoleProcessor(lineProc: (x: string) => any = (0, eval), {
 	});
 }
 
-async function processRequest<T extends MinimumTableObject>(o: RequestObject<T>, path: string, sect: RouteObj): Promise<any> {
+async function processRequest(o: RequestObject, path: string, sect: RouteObj): Promise<any> {
 	try {
 		if (sect) {
 			let proc: processFunction;
@@ -283,20 +313,16 @@ async function processRequest<T extends MinimumTableObject>(o: RequestObject<T>,
 				o.queue.forEach(v => v(o, path));
 				if (typeof proc === "function") {
 					let res = await proc(o, path);
+					if (sect[resultProcessor])
+						res = sect[resultProcessor](res, o);
 					if (res || res === false) {
-						if (typeof res === "object") {
-							res = JSON.stringify(res);
-						}
-						o.response.end(res);
 						return res;
 					}
 					else
 						return true;
 				}
 				else {
-					if (!o.response.hasHeader("Content-Type"))
-						o.response.setHeader("Content-Type", "text/html; charset=UTF-8");
-					return o.response.end(proc);
+					return proc;
 				}
 			} else
 				notFound(o);
@@ -311,8 +337,8 @@ async function processRequest<T extends MinimumTableObject>(o: RequestObject<T>,
 	}
 }
 
-export function createProcessor<T extends MinimumTableObject = MinimumTableObject>(routeObj: RouteObj, dbAdapter: dbAdapter<T>) {
-	return Object.assign((request: RequestMessage, response: ResponseMessage) => {
+export function createProcessor(routeObj: RouteObj) {
+	return (request: RequestMessage, response: ResponseMessage) => {
 		const _writeHead = response.writeHead;
 		response.cookies = [];
 		response.writeHead = function (...args: any[]) {
@@ -321,19 +347,10 @@ export function createProcessor<T extends MinimumTableObject = MinimumTableObjec
 			return _writeHead.call(this, ...args);
 		};
 		let path = decodeURI(request.url);
-		const stringParams: NodeJS.Dict<string | boolean> = {};
 		const spsi = path.indexOf('?');
-		if (spsi > 0) {
-			path.substr(spsi + 1).split('&').forEach(function (param) {
-				const splt = param.indexOf('=');
-				if (splt > 0)
-					stringParams[param.substr(0, splt)] = param.substr(splt + 1);
-				else
-					stringParams[param] = true;
-			});
-			path = path.substr(0, spsi);
-		}
-		request.stringParams = stringParams;
+		request.stringParams = spsi > 0 ? tools.map2obj(path.substr(spsi + 1).split('&')) : {};
+		if (spsi > 0)
+			path = path.slice(0, spsi);
 		request.cookies = (request.headers.cookie
 			? request.headers.cookie.split(';').map(c => {
 				const ca = tools.split(c, "=", 2);
@@ -351,52 +368,57 @@ export function createProcessor<T extends MinimumTableObject = MinimumTableObjec
 			request.on("data", data => body += data);
 		});
 		const startTime = tools.formatedTime;
-		const o: RequestObject<T> = {
+		const o: RequestObject = {
 			request: request,
 			response: response,
 			fpath: path,
 			queue: [],
-			doLog: true,
-			dbAdapter: dbAdapter
+			doLog: true
 		};
 		processRequest(o, path, routeObj).catch(e => {
-			if (typeof e.code === "number") {
-				if (o.doLog && !e.usual) {
-					console.log(`${e.code} ${e.text}`);
+			if (!response.writableEnded) {
+				if (typeof e.code === "number") {
+					if (o.doLog && !e.usual) {
+						console.log(`${e.code} ${e.text}`);
+					}
+					response.writeHead(e.code, e.text);
+					return response.end();
 				}
-				response.writeHead(e.code, e.text);
-				return response.end();
+				else {
+					response.writeHead(500, "Internal Server Error");
+					response.end();
+				}
 			}
 			if (o.doLog)
 				console.error(e);
-			try {
-				response.writeHead(500, "Internal Server Error");
-			}
-			finally {
-				try {
-					response.end();
+		}).then(res => {
+			if (!o.response.writableEnded) {
+				if (typeof res === "object") {
+					res = JSON.stringify(res);
+					if (!o.response.hasHeader("Content-Type") && !o.response.headersSent)
+						o.response.setHeader("Content-Type", "application/json; charset=UTF-8");
 				}
-				catch (e) { }
+				else if (!o.response.hasHeader("Content-Type") && !o.response.headersSent)
+					o.response.setHeader("Content-Type", "text/html; charset=UTF-8");
+				o.response.end(typeof res === "string" ? res : undefined);
 			}
 		});
 		if (o.doLog) {
-			console.log(`${startTime} -> request ${request.method} "${path}" ${JSON.stringify(stringParams)}`);
-			response.on("close", () => console.log(`${startTime} - ${tools.formatedTime} -> closed ${request.method} "${path}" ${JSON.stringify(stringParams)}`));
-			response.on("finish", () => console.log(`${startTime} - ${tools.formatedTime} -> finished ${request.method} "${path}" ${JSON.stringify(stringParams)}`));
+			console.log(`${startTime} -> request ${request.method} "${path}"`);
+			response.on("close", () => console.log(`${startTime} - ${tools.formatedTime} -> closed ${request.method} "${path}"`));
+			response.on("finish", () => console.log(`${startTime} - ${tools.formatedTime} -> finished ${request.method} "${path}"`));
 		}
-	}, {
-		changeRouteObj: o => routeObj = (typeof o === "string" ? loadRouteObj(o) : o)
-	})
+	};
 };
 
-export function crt(processor: RequestListener, port = args.port, options?: ServOptions) {
+export function crt(processor: RequestListener, port: number, options?: ServOptions) {
 	const silense = options && options.silense;
 	const mode = options && options.mode || (typeof options === "string" && options) || "http";
 	const serverOptions = options && options.serverOptions || {};
-	return new Promise((resolve, reject) => {
+	return new Promise<Server>((resolve, reject) => {
 		if (!silense)
 			console.log(`Starting listener (${mode}) on port ${port}`);
-		let server;
+		let server: Server;
 		switch (mode) {
 			case "http":
 				server = createHttpServer(serverOptions, processor);
@@ -610,7 +632,7 @@ export async function createSubServer(processor: RequestListener, ports: PortsAr
 		}
 		if (!Array.isArray(vrnts))
 			vrnts = [vrnts];
-		const res = {};
+		const res: { [port: number]: Server } = {};
 		for (const prt of vrnts) {
 			try {
 				res[prt] = await crt(processor, prt, options);
@@ -623,7 +645,7 @@ export async function createSubServer(processor: RequestListener, ports: PortsAr
 	}
 }
 
-export async function defaultServerStart(routeObj: string | RouteObj = "route.js", evalF = (0, eval), serverOptions?: ServerOptions, httpPort?: PortsArr | number, httpsPort?: PortsArr | number) {
+export async function defaultServerStart(routeObj: string | RouteObj = "route.js", evalF = (0, eval), serverOptions?: ServerOptions, httpPort?: PortsArr | number, httpsPort?: PortsArr | number): Promise<{ [port: number]: Server, processor: typeof processor }> {
 	if (serverOptions && (typeof serverOptions !== "object" || Array.isArray(serverOptions) && !httpPort)) {
 		httpPort = serverOptions;
 		serverOptions = undefined;
@@ -633,7 +655,7 @@ export async function defaultServerStart(routeObj: string | RouteObj = "route.js
 		httpPort = [[80], [8080], "*"];
 	if (typeof routeObj === "string")
 		routeObj = await loadRouteObj(routeObj);
-	const processor = createProcessor(routeObj, null);
+	const processor = createProcessor(routeObj);
 	initConcoleProcessor(evalF);
 	const res: any = await createSubServer(processor, httpPort);
 	if (serverOptions) {
@@ -644,7 +666,7 @@ export async function defaultServerStart(routeObj: string | RouteObj = "route.js
 	return res;
 }
 
-export function redirect<T extends MinimumTableObject>(o: RequestObject<T>, to: string, dl?: boolean) {
+export function redirect(o: RequestObject, to: string, dl?: boolean) {
 	if (dl !== null && dl !== undefined)
 		o.doLog = dl;
 	o.response.setHeader("Location", to);
@@ -654,7 +676,7 @@ export function redirect<T extends MinimumTableObject>(o: RequestObject<T>, to: 
 	};
 }
 
-export function notFound<T extends MinimumTableObject>(o: RequestObject<T>, dl?: boolean) {
+export function notFound(o: RequestObject, dl?: boolean) {
 	if (dl !== null && dl !== undefined)
 		o.doLog = dl;
 	throw {
@@ -663,218 +685,132 @@ export function notFound<T extends MinimumTableObject>(o: RequestObject<T>, dl?:
 	};
 }
 
-type allowedMethods = "head" | "get" | "post" | "put" | "delete" | "options";
-export const defaultAllowedMethods: Set<allowedMethods> = new Set(["head", "get", "options"]);
-export const allAllowedMethods: Set<allowedMethods> = new Set(["head", "get", "post", "put", "delete", "options"]);
-
-export const crudApiSimpleOptions = {
-	default: <T extends {}>(allowedMethods: Set<allowedMethods | string> | "*" = "*") => ({
-		allowedMethods,
-		getNullPathFun(o: RequestObject<T>, getP: NodeJS.Dict<string | boolean>) {
-			//o.dbAdapter.get;
-		}
-	})
-};
-
-export function crudApi<T extends {}>(dbAdapter: dbAdapter<T>, options?: {
-	allowedMethods?: Set<allowedMethods | string> | "*";
-	allowedOrigin?: string | string[];
-	allowedHeaders?: string[] | "*";
-	getNullPathFun?(o: RequestObject<T>, getP: NodeJS.Dict<string | boolean>): any;
-	getNotNullPathFun?(o: RequestObject<T>, path: string): any;
-	primiryKey?: string;
-}, aditionalMethodsHandlers?: CurrentRouteObj) {
-	options = Object.assign<typeof options, typeof options>({
-		allowedMethods: defaultAllowedMethods,
-		allowedHeaders: "*",
-		allowedOrigin: "*"
-	}, options);
-	const allowedHeaders = typeof options.allowedHeaders === "string" ? options.allowedHeaders : options.allowedHeaders.join();
-	const allowedMethods = typeof options.allowedMethods === "string" ? options.allowedMethods : Array.from(options.allowedMethods).join();
-	const res: RouteObj = {
-		[fromThere](o) {
-			o.response.setHeader("Access-Control-Allow-Origin", Array.isArray(options.allowedOrigin) ?
-				(o.request.headers.origin && options.allowedOrigin.includes(o.request.headers.origin) ?
-					o.request.headers.origin
-					: options.allowedOrigin[0])
-				: options.allowedOrigin);
-			o.response.setHeader("Access-Control-Allow-Headers", allowedHeaders);
-			o.response.setHeader("Access-Control-Allow-Methods", allowedMethods);
-		}
-	};
-	const primaryKey = options.primiryKey;
-	const cur: CurrentRouteObj = res[current] = {};
-	for (let method of allowedMethods === "*" ? allAllowedMethods : allowedMethods)
-		switch (method = method.toUpperCase()) {
-			case "GET":
-				cur[method] = function (o, path) {
-					return dbAdapter.getByKey(path, primaryKey);
-				};
-				break;
-			case "POST":
-				cur[method] = async function (o, path) {
-					if (path === "")
-						return dbAdapter.insert(JSON.parse(await o.request.body));
-					else
-						notFound(o);
-				};
-				break;
-			case "PUT":
-				cur[method] = async function (o, path) {
-					const obj = JSON.parse(await o.request.body);
-					return dbAdapter.update(obj, path, Object.keys(obj) as any, primaryKey);
-				};
-				break;
-			case "DELETE":
-				cur[method] = function (o, path) {
-					return dbAdapter.delete(path, primaryKey);
-				};
-				break;
-			case "HEAD":
-			case "OPTIONS":
-			default:
-				cur[method] = function () { };
-		}
-	return Object.assign(res, aditionalMethodsHandlers);
+class OnlyOneProcessorError extends Error {
+	constructor(method: string) {
+		super(`Only one ${method} callback allowed`);
+		this.name = "OnlyOneProcessorError";
+	}
 }
 
-/*export function crudApi<T extends MinimumTableObject>(handlers: {
-	get?(path: string, o: RequestObject<T>): any;
-	getAll?(o: RequestObject<T>): any;
-	post?(): any;
-	put?(): any;
-	delete?(): any;
-	options?(): any;
-}, options?: {
-	pre?(o: RequestObject<T>): any;
-	optionsMethodGen?: boolean;
-	getForOneItemGen?: boolean;
-}): RouteObj;
-
-export function crudApi(...args) {
-	let obj;
-	let options;
-	if (typeof args[0] === "object") {
-		obj = args[0];
-		if (args[1])
-			options = args[1];
-		else
-			options = {};
-	} else {
-		obj = {};
-		let i = 0;
-		while (i < args.length && typeof args[i] !== "object")
-			obj[["getAll", "get", "add", "update", "delete", "options"][i]] = args[i++];
-		if (i < args.length)
-			options = args[i];
-		else
-			options = {};
-	}
-	Object.assign({
-		pre: ({ response }) => {
-			response.setHeader("Access-Control-Allow-Origin", "*");
-			response.setHeader("Access-Control-Allow-Headers", "*");
-			response.setHeader("Access-Control-Allow-Methods", "*");
+/*export const crud = function (): Builder {
+	const crudP: CurrentRouteObj = {};
+	const usedMethods;
+	let returnProcessor = (ret: any, o: RequestObject) => ret;
+	const builder = {
+		get(cb: (path: string, get: NodeJS.Dict<string | boolean>, o: { dbAdapter: dbAdapter } & RequestObject) => any) {
+			if (check.get)
+				throw new OnlyOneProcessorError("get");
+			check.get = true;
+			crudP.GET = (o: RequestObject, path: string) => returnProcessor(cb(path, o.request.stringParams, Object.assign({ dbAdapter }, o)), o);
+			return builder;
 		},
-		optionsMethodGen: false,
-		getForOneItemGen: true
-	}, options);
-	const res: any = {
-		[fromThere]: options.pre
-	};
-	const get = {
-		all: null,
-		s: null
-	};
-	const allow = [];
-	for (const oname in obj) {
-		const uoname = oname.toUpperCase();
-		const oc = obj[oname];
-		switch (uoname) {
-			case "GETALL":
-				get.all = oc;
-				break;
-			case "GET":
-				get.s = oc;
-				break;
-			case "ADD":
-			case "POST":
-				Object.assign(res, {
-					POST: async (o) =>
-						oc(JSON.parse(await o.request.body), o)
-				});
-				allow.push("POST");
-				break;
-			case "PUT":
-			case "UPDATE":
-				Object.assign(res, {
-					PUT: async (o, path) =>
-						oc(path, JSON.parse(await o.request.body), o)
-				});
-				allow.push("PUT");
-				break;
-			case "DELETE":
-				Object.assign(res, {
-					"DELETE": (o, path) =>
-						oc(path, o)
-				});
-				allow.push("DELETE");
-				break;
-			case "OPTIONS":
-				Object.assign(res, {
-					OPTIONS: (o, path) =>
-						oc(allow, o, path)
-				});
-				allow.push("OPTIONS");
-				break;
-			default:
-				Object.assign(res, {
-					POST: async (o, path) =>
-						oc(path, o)
-				});
-				allow.push(uoname);
+		postForm(cb: (path: string, post: NodeJS.Dict<string | boolean>, o: { dbAdapter: dbAdapter } & RequestObject) => any) {
+			if (check.post)
+				throw new OnlyOneProcessorError("post");
+			check.post = true;
+			crudP.POST = async (o: RequestObject, path: string) => returnProcessor(cb(path, tools.map2obj((await o.request.body).split('&')), Object.assign({ dbAdapter }, o)), o);
+			return builder;
+		},
+		postJson(cb: (path: string, obj: any, o: { dbAdapter: dbAdapter } & RequestObject) => any) {
+			if (check.post)
+				throw new OnlyOneProcessorError("post");
+			check.post = true;
+			crudP.POST = async (o: RequestObject, path: string) => returnProcessor(cb(path, JSON.parse(await o.request.body), Object.assign({ dbAdapter }, o)), o);
+			return builder;
+		},
+		put(cb: (path: string, obj: any, o: { dbAdapter: dbAdapter } & RequestObject) => any) {
+			if (check.put)
+				throw new OnlyOneProcessorError("put");
+			check.put = true;
+			crudP.PUT = async (o: RequestObject, path: string) => returnProcessor(cb(path, tools.map2obj((await o.request.body).split('&')), Object.assign({ dbAdapter }, o)), o);
+			return builder;
+		},
+		delete(cb: (path: string, get: NodeJS.Dict<string | boolean>, o: { dbAdapter: dbAdapter } & RequestObject) => any) {
+			if (check.delete)
+				throw new OnlyOneProcessorError("delete");
+			check.delete = true;
+			crudP.DELETE = (o: RequestObject, path: string) => returnProcessor(cb(path, o.request.stringParams, Object.assign({ dbAdapter }, o)), o);
+			return builder;
+		},
+		setReturnProcessor(cb: (ret: any, o: RequestObject) => any) {
+			returnProcessor = cb;
+			return builder;
 		}
-	}
-	obj = null;
-	if (get.all)
-		if (get.s)
-			obj = (get, o, path) => path === "" ? get.all(o) : get.s(path, o);
-		else if (options.getForOneItemGen)
-			obj = (get, o, path) => {
-				const r = get.all(o);
-				if (path === "")
-					return r;
-				if (path in r)
-					return r[path];
-				else
-					notFound(o);
-			}
-		else
-			obj = get.all;
-	else
-		if (get.s)
-			obj = (get, o, path) => get.s(path, o);
-	if (obj) {
-		res.GET = obj.bind(null, get);
-		allow.push("GET");
-	}
-	if (options.optionsMethodGen && !res.OPTIONS) {
-		Object.assign(res, {
-			OPTIONS: (o) => {
-				o.response.setHeader("Allow", allow);
-			}
-		});
-		allow.push("OPTIONS");
-	}
-	return {
-		[current]: res
 	};
+	return builder;
 }*/
 
-export function printIPs(tabs = 0, printInternal: boolean = true) {
+export class crud {
+	static Builder = class Builder {
+		private usedMethods: Set<string>;
+		private processors: NodeJS.Dict<{ cb: (o: RequestObject, path: string) => any, priority: number }[]>;
+		constructor() {
+			this.usedMethods = new Set(["OPTIONS"]);
+			this.processors = {
+				OPTIONS: [{ cb: o => o.response.setHeader("Allow", Array.from(this.usedMethods).join(", ")), priority: Infinity }]
+			};
+		}
+		useMethod(method: string, cb: (o: RequestObject, path: string) => any, priority = 50) {
+			method = method.toUpperCase();
+			if (!this.usedMethods.has(method)) {
+				this.usedMethods.add(method);
+				this.processors[method] = [];
+			}
+			this.processors[method].push({ cb: cb, priority });
+			return this;
+		}
+		get(cb: (path: string, get: NodeJS.Dict<string | boolean>, o: RequestObject) => any, priority = 50) {
+			return this.useMethod("get", (o, path) => cb(path, o.request.stringParams, o), priority);
+		}
+		getRoot(cb: (get: NodeJS.Dict<string | boolean>, o: RequestObject) => any) {
+			return this.useMethod("get", (o, path) => path === "" && cb(o.request.stringParams, o), 0);
+		}
+		post(cb: (path: string, body: string, o: RequestObject) => any, priority = 50) {
+			return this.useMethod("post", async (o, path) => cb(path, await o.request.body, o), priority);
+		}
+		postForm(cb: (path: string, post: NodeJS.Dict<string | boolean>, o: RequestObject) => any, priority = 50) {
+			return this.post((path, body, o) => cb(path, tools.map2obj(body.split("&"), l => tools.split(l, "=", 2), { code: 404 }), o), priority);
+		}
+		postJson(cb: (path: string, obj: any, o: RequestObject) => any, priority = 50) {
+			return this.post((path, body, o) => cb(path, JSON.parse(body), o), priority);
+		}
+		put(cb: (path: string, body: string, o: RequestObject) => any, priority = 50): Builder {
+			return this.useMethod("put", async (o, path) => cb(path, await o.request.body, o), priority);
+		}
+		delete(cb: (path: string, get: NodeJS.Dict<string | boolean>, o: RequestObject) => any, priority = 50): Builder {
+			return this.useMethod("delete", (o, path) => cb(path, o.request.stringParams, o), priority);
+		}
+		build(): RouteObj {
+			const res: RouteObj = {
+				[current]: tools.map2obj(Array.from(this.usedMethods), m => {
+					const procs = this.processors[m].sort((a, b) => a.priority - b.priority).map(v => v.cb);
+					return [m, async (o, path) => {
+						let error = { code: 404 };
+						for (const proc of procs) {
+							try {
+								const res = await proc(o, path);
+								if (res)
+									return res;
+							} catch (e) {
+								if (Number.isInteger(e.code))
+									error = e;
+							}
+						}
+						throw error;
+					}];
+				}, { code: 404 })
+			};
+			this.usedMethods = null;
+			this.processors = null;
+			return res;
+		}
+	}
+}
+
+export function printIPs(tabs = 0, printInternal = false) {
 	const ips: NodeJS.Dict<string[]> = {
-		//"IPv4": [],
-		//"IPv6": []
+		"IPv4": [],
+		"IPv6": []
 	};
 	if (printInternal)
 		ips.Internal = [];
@@ -883,28 +819,19 @@ export function printIPs(tabs = 0, printInternal: boolean = true) {
 		strtbs += "\t";
 	const nets = networkInterfaces();
 	for (const key in nets)
-		for (const ip of nets[key].sort((a, b) => a.family.localeCompare(b.family) || a.address.localeCompare(b.address)))
+		for (const ip of nets[key])
 			if (ip.internal) {
 				if (printInternal)
 					ips.Internal.push(`${ip.address} (${key})`);
 			} else if (ips[ip.family])
 				ips[ip.family].push(`${ip.address} (${key})`);
 			else
-				ips[ip.family] = [ip.address];
+				ips[ip.family] = [`${ip.address} (${key})`];
 	for (const key in ips) {
+		if (ips[key].length === 0)
+			continue;
 		console.log(strtbs + key + ":");
 		for (const ip of ips[key])
 			console.log(strtbs + "\t" + ip);
 	}
 };
-
-if (module === require.main) {
-	console.log("SODS 0.16.0 \nargs:");
-	console.log(args);
-	console.log("Initializing...");
-	defaultServerStart().then(() => {
-		console.log("\nLocal IPs:");
-		printIPs(1);
-		console.log("Done");
-	});
-}
