@@ -3,259 +3,7 @@ import { createServer as createHttpServer, ServerResponse, IncomingMessage, Outg
 import { networkInterfaces } from "os";
 import * as mime from "mime";
 import { ServerOptions, createServer as createHttpsServer } from "https";
-import { Database } from "sqlite3";
-import { promisify } from "util";
-
-//const parrent = Symbol("parrent");
-
-type processFunction = (o: RequestObject, path: string) => any | Promise<any>;
-
-export interface dbAdapter {
-	table: string;
-	getByKey(key: number | string, pk?: string): Promise<any>;
-	getWhere(condition: string, limit?: number, skip?: number): Promise<any[]>;
-	insert(obj: any): Promise<void>;
-	insert(obj: any[]): Promise<void>;
-	updateWhere(obj: any, where: string, editedProps: string[]): Promise<void>;
-	update(obj: any, key: string | number, editedProps: string[], pk?: string): Promise<void>;
-	deleteWhere(where: string): Promise<void>;
-	delete(key: string | number, pk?: string): Promise<void>;
-
-	run?(sql: string): Promise<any>;
-	db?: any;
-}
-
-export class sqlite3_dbAdapter implements dbAdapter {
-	db: Database;
-	private dbAll: (sql: string) => Promise<any[]>;
-	private dbGet: (sql: string) => Promise<any>;
-	private dbRun: (sql: string) => Promise<void>;
-	protected pk?: string;
-	table: string;
-
-	constructor(db: Database, table: string, pk?: string) {
-		this.db = db;
-		this.dbAll = promisify(db.all).bind(db);
-		this.dbGet = promisify(db.get).bind(db);
-		this.dbRun = promisify(db.run).bind(db);
-		this.pk = pk;
-		this.table = table;
-	}
-	async getByKey(key: string | number, pk?: string): Promise<any> {
-		if (!pk)
-			pk = (this.pk ? this.pk : this.pk = await this.dbGet(`pragma table_info(${this.table}) where pk != 0`));
-		return this.dbGet(`select * from ${this.table} where ${pk} = ${key}`);
-	}
-	async getWhere(condition: string, limit?: number, skip?: number): Promise<any[]> {
-		return this.dbAll(`select * from ${this.table} where ${condition}`);
-	}
-	async insert(obj: any) {
-		if (!Array.isArray(obj))
-			obj = [obj];
-		const keys: string[] = Object.keys(obj[0]) as any;
-		await this.dbRun(`insert into ${this.table} (${keys.join()}) values ${obj.map(v => `(${keys.map(k => JSON.stringify(v[k], (k, v) => typeof v === "object" ? null : v)).join()})`).join()}`);
-	}
-	async updateWhere(obj: any, where: string, editedProps: string[]) {
-		await this.dbRun(`update ${this.table} where ${where} set ${editedProps.map(k => `${k} = ${JSON.stringify(obj[k])}`).join()}`);
-	}
-	async update(obj: any, key: string | number, editedProps: string[], pk?: string) {
-		if (!pk)
-			pk = (this.pk ? this.pk : this.pk = await this.dbGet(`pragma table_info(${this.table}) where pk != 0`));
-		await this.updateWhere(obj, `${this.pk} = ${key}`, editedProps);
-	}
-	async deleteWhere(where: string): Promise<void> {
-		await this.dbRun(`delete ${this.table} where ${where}`);
-	}
-	async delete(key: string | number, pk?: string): Promise<void> {
-		if (!pk)
-			pk = (this.pk ? this.pk : this.pk = await this.dbGet(`pragma table_info(${this.table}) where pk != 0`));
-		await this.deleteWhere(`${this.pk} = ${key}`);
-	}
-}
-
-export class RequestMessage extends IncomingMessage {
-	cookies: ReceivedCookie[];
-	stringParams: NodeJS.ReadOnlyDict<string | boolean>;
-	body: Promise<string>;
-}
-
-export class ResponseMessage extends ServerResponse {
-	cookies: Cookie[];
-}/*
-
-export class MinimumTableObject {
-	token: string;
-	expires: number;
-};*/
-
-export class RequestObject {
-	request: RequestMessage;
-	response: ResponseMessage;
-	fpath: string;
-	queue: ((o: RequestObject, path: string) => void)[];
-	doLog: boolean;
-};
-
-export class ReceivedCookie {
-	name: string;
-	value: string;
-	toString() {
-		return `${this.name}=${this.value}`;
-	}
-}
-
-export class Cookie extends ReceivedCookie {
-	expires?: Date;
-	maxAge?: number;
-	secure?: boolean;
-	httpOnly?: boolean;
-	domain?: string;
-	path?: string;
-	sameSite?: "Strict" | "Lax" | "None";
-	toString() {
-		let res = super.toString();
-		if (this.expires)
-			res += "; Expires=" + this.expires.toUTCString();
-		if (this.maxAge)
-			res += "; Max-Age=" + this.maxAge;
-		if (this.domain)
-			res += "; Domain=" + this.domain;
-		if (this.path)
-			res += "; Path=" + this.path;
-		if (this.secure)
-			res += "; Secure";
-		if (this.httpOnly)
-			res += "; HttpOnly";
-		if (this.sameSite)
-			res += "; SameSite=" + this.sameSite;
-		return res;
-	}
-}
-
-type PortsArr = (number[] | number | "*")[];
-
-type ServOptions = {
-	silense?: boolean,
-	mode: "http" | "https",
-	serverOptions?: ServerOptions
-};
-
-export const onError = Symbol("Error route");
-export const current = Symbol("Current path");
-export const fromThere = Symbol("Subpaths only");
-export const resultProcessor = Symbol("Callback for return values");
-
-export type CurrentRouteObj = processFunction | {
-	[method: string]: processFunction,
-	HEAD?: processFunction,
-	GET?: processFunction,
-	POST?: processFunction,
-	PUT?: processFunction,
-	DELETE?: processFunction,
-	OPTIONS?: processFunction
-};
-
-export type RouteObj = {
-	[current]?: CurrentRouteObj,
-	[onError]?: (e: Error | { code: number }, o: RequestObject) => any,
-	[fromThere]?: (o: RequestObject, path: string, declaredPath: string) => any | Promise<any>,
-	[resultProcessor]?: (ret: any, o: RequestObject) => any
-} & NodeJS.Dict<RouteObj> | string | processFunction;
-
-class Tools {
-	time(strings: TemplateStringsArray, ...params: any[]) {
-		let res = "";
-		let i = 0;
-		while (i < params.length) {
-			const tmp = params[i];
-			res += strings[i] + (typeof tmp === "number" ? tools._lengthOpti(2, tmp) : tmp);
-			i++;
-		}
-		return res + strings[i];
-	}
-	_lengthOpti(length: number, be: number) {
-		const bs = "" + Math.trunc(be);
-		return "000000000000".slice(12 + bs.length - length) + bs;
-	}
-	get formatedTime() {
-		const p = new Date();
-		return tools.time`${p.getHours()}:${p.getMinutes()}:${p.getSeconds()}.${tools._lengthOpti(3, p.getMilliseconds())}`;
-	}
-	_rand(start: number, lngth: number) {
-		return Math.floor(Math.random() * lngth + start);
-	}
-	random(start: number, end: number) {
-		return tools._rand(start, end - start);
-	}
-	split(str: string, separator: string, count: 2, min?: false): [string, string];
-	split<T extends number>(str: string, separator: string, count: T, min?: false): string[] & { length: T };
-	split(str: string, separator: string, count: number, min: true): string[];
-	split(str: string, separator?: string, count?: -1): string[];
-	split(str: string, separator: string = "", count: number = -1, min = false) {
-		if (count < 0)
-			return str.split(separator);
-		if (count === 0)
-			return [];
-		str = "" + str;
-		if (count === 1)
-			return [str];
-		const res: string[] = min ? [] : Array.from({ length: count });
-		let i = 0;
-		while (count !== 1) {
-			count--;
-			separator = "" + separator;
-			const si = str.indexOf(separator);
-			if (si < 0)
-				break;
-			res[i++] = str.slice(0, si);
-			str = str.slice(si + 1);
-		}
-		if (i + 1 !== res.length)
-			throw Error("");
-		res[i] = str;
-		return res;
-	}
-	deepCopy<T extends NodeJS.Dict<any>>(obj: T): T {
-		const res: any = {};
-		for (const nm in obj) {
-			const v = obj[nm];
-			if (typeof v === "object")
-				res[nm] = tools.deepCopy(v);
-			else
-				res[nm] = v;
-		}
-		return res;
-	}
-	map2obj<T1, T2>(arr: T1[], l: (l: T1) => [T1, T2], throwable: Error | { code: number }): NodeJS.Dict<T2>;
-	map2obj<T1, T2>(arr: T1[], l: (l: T1) => [T1, T2]): NodeJS.Dict<T2 | boolean>;
-	map2obj(arr: string[]): NodeJS.Dict<string | boolean>;
-	map2obj(arr: string[], throwable: Error | { code: number }): NodeJS.Dict<string>;
-	map2obj(arr: any[], l: any = (l: any) => tools.split(l, '=', 2), throwable?: any) {
-		const res = {};
-		if (!(typeof l === "function" || l instanceof Function)) {
-			throwable = l;
-			l = (l: any) => tools.split(l, '=', 2);
-		}
-		arr.forEach(s => {
-			const a = l(s);
-			if (a && a.length > 0)
-				if (a.length < 2)
-					if (throwable)
-						throw throwable;
-					else
-						res[a[0]] = true;
-				else
-					res[a[0]] = a[1];
-			else if (throwable)
-				throw throwable;
-		});
-		return res;
-	}
-}
-export const tools = new Tools();
-
-
-const pathNormalizeRegExp = /^\/+|\/+$|\/+(?=\/)/g;
+import { Cookie, current, fromThere, onError, pathNormalizeRegExp, PortsArr, processFunction, ReceivedCookie, RequestMessage, RequestObject, ResponseMessage, resultProcessor, RouteObj, ServOptions, tools } from "./basics";
 
 let inpLine = "";
 export const args = tools.map2obj(process.argv.slice(2));
@@ -343,21 +91,18 @@ export function createProcessor(routeObj: RouteObj) {
 		response.cookies = [];
 		response.writeHead = function (...args: any[]) {
 			if (this.cookies.length !== 0)
-				this.setHeader("Set-Cookie", this.cookies.map((v: Cookie) => v.toString()));
+				this.setHeader("Set-Cookie", this.cookies.map((v: Cookie) => Cookie.prototype.toString.call(v)));
 			return _writeHead.call(this, ...args);
 		};
 		let path = decodeURI(request.url);
 		const spsi = path.indexOf('?');
-		request.stringParams = spsi > 0 ? tools.map2obj(path.substr(spsi + 1).split('&')) : {};
+		request.stringParams = spsi > 0 ? tools.map2obj(path.substr(spsi + 1).split('&'), l => tools.split(l, "=", 2, false)) : {};
 		if (spsi > 0)
 			path = path.slice(0, spsi);
 		request.cookies = (request.headers.cookie
 			? request.headers.cookie.split(';').map(c => {
 				const ca = tools.split(c, "=", 2);
-				return {
-					name: ca[0].trim(),
-					value: ca[1].trim()
-				};
+				return new ReceivedCookie(ca[0].trim(), ca[1].trim());
 			})
 			: []);
 		path = path.replace(pathNormalizeRegExp, "");
@@ -400,7 +145,8 @@ export function createProcessor(routeObj: RouteObj) {
 				}
 				else if (!o.response.hasHeader("Content-Type") && !o.response.headersSent)
 					o.response.setHeader("Content-Type", "text/html; charset=UTF-8");
-				o.response.end(typeof res === "string" ? res : undefined);
+				if (typeof res === "string")
+					o.response.end(res);
 			}
 		});
 		if (o.doLog) {
@@ -571,7 +317,7 @@ export function fileAsResponse(path: string, options?: {
 			notFound(o, options.logErrors);
 		}
 	}
-}
+}/*
 
 export function host(path, options) {
 	if (!path)
@@ -579,30 +325,7 @@ export function host(path, options) {
 	if (!path.endsWith('/'))
 		path += '/';
 
-}
-
-export function getRoleByToken(token) {
-
-}
-
-export function authorized(_as, tokenName = "token", e1se = (o: RequestObject): void => {
-	throw { code: 401, text: "Unauthorized" };
-}) {
-	return (o: RequestObject) => {
-		if (o.request.cookies[tokenName]) {
-			//o.storage.tokens.
-		} else
-			e1se(o);
-	};
-}
-
-export function authorization() {
-	return {
-		[current]: {
-			get: (o: RequestObject, path: string) => { }
-		}
-	};
-}
+}*/
 
 function normPort(port: PortsArr | number) {
 	if (!Array.isArray(port))
@@ -684,61 +407,6 @@ export function notFound(o: RequestObject, dl?: boolean) {
 		text: "Not found"
 	};
 }
-
-class OnlyOneProcessorError extends Error {
-	constructor(method: string) {
-		super(`Only one ${method} callback allowed`);
-		this.name = "OnlyOneProcessorError";
-	}
-}
-
-/*export const crud = function (): Builder {
-	const crudP: CurrentRouteObj = {};
-	const usedMethods;
-	let returnProcessor = (ret: any, o: RequestObject) => ret;
-	const builder = {
-		get(cb: (path: string, get: NodeJS.Dict<string | boolean>, o: { dbAdapter: dbAdapter } & RequestObject) => any) {
-			if (check.get)
-				throw new OnlyOneProcessorError("get");
-			check.get = true;
-			crudP.GET = (o: RequestObject, path: string) => returnProcessor(cb(path, o.request.stringParams, Object.assign({ dbAdapter }, o)), o);
-			return builder;
-		},
-		postForm(cb: (path: string, post: NodeJS.Dict<string | boolean>, o: { dbAdapter: dbAdapter } & RequestObject) => any) {
-			if (check.post)
-				throw new OnlyOneProcessorError("post");
-			check.post = true;
-			crudP.POST = async (o: RequestObject, path: string) => returnProcessor(cb(path, tools.map2obj((await o.request.body).split('&')), Object.assign({ dbAdapter }, o)), o);
-			return builder;
-		},
-		postJson(cb: (path: string, obj: any, o: { dbAdapter: dbAdapter } & RequestObject) => any) {
-			if (check.post)
-				throw new OnlyOneProcessorError("post");
-			check.post = true;
-			crudP.POST = async (o: RequestObject, path: string) => returnProcessor(cb(path, JSON.parse(await o.request.body), Object.assign({ dbAdapter }, o)), o);
-			return builder;
-		},
-		put(cb: (path: string, obj: any, o: { dbAdapter: dbAdapter } & RequestObject) => any) {
-			if (check.put)
-				throw new OnlyOneProcessorError("put");
-			check.put = true;
-			crudP.PUT = async (o: RequestObject, path: string) => returnProcessor(cb(path, tools.map2obj((await o.request.body).split('&')), Object.assign({ dbAdapter }, o)), o);
-			return builder;
-		},
-		delete(cb: (path: string, get: NodeJS.Dict<string | boolean>, o: { dbAdapter: dbAdapter } & RequestObject) => any) {
-			if (check.delete)
-				throw new OnlyOneProcessorError("delete");
-			check.delete = true;
-			crudP.DELETE = (o: RequestObject, path: string) => returnProcessor(cb(path, o.request.stringParams, Object.assign({ dbAdapter }, o)), o);
-			return builder;
-		},
-		setReturnProcessor(cb: (ret: any, o: RequestObject) => any) {
-			returnProcessor = cb;
-			return builder;
-		}
-	};
-	return builder;
-}*/
 
 export class crud {
 	static Builder = class Builder {
