@@ -1,2 +1,2 @@
 Simple Object Defined Server
-Documentation not ready yet ¯\_(ツ)_/¯
+Documentation not ready yet ¯\\_(ツ)_/¯
