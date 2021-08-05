@@ -368,7 +368,7 @@ export async function createSubServer(processor: RequestListener, ports: PortsAr
 	}
 }
 
-export async function defaultServerStart(routeObj: string | RouteObj = "route.js", evalF = (0, eval), serverOptions?: ServerOptions, httpPort?: PortsArr | number, httpsPort?: PortsArr | number): Promise<{ [port: number]: Server, processor: typeof processor }> {
+export async function defaultServerStart(routeObj: string | RouteObj = "route.js", evalF = (0, eval), serverOptions?: ServerOptions, httpPort?: PortsArr | number, httpsPort?: PortsArr | number): Promise<{ [port: number]: Server, processor: (request: RequestMessage, response: ResponseMessage) => void }> {
 	if (serverOptions && (typeof serverOptions !== "object" || Array.isArray(serverOptions) && !httpPort)) {
 		httpPort = serverOptions;
 		serverOptions = undefined;
@@ -408,8 +408,7 @@ export function notFound(o: RequestObject, dl?: boolean) {
 	};
 }
 
-export class crud {
-	static Builder = class Builder {
+export class crudBuilder {
 		private usedMethods: Set<string>;
 		private processors: NodeJS.Dict<{ cb: (o: RequestObject, path: string) => any, priority: number }[]>;
 		constructor() {
@@ -442,10 +441,10 @@ export class crud {
 		postJson(cb: (path: string, obj: any, o: RequestObject) => any, priority = 50) {
 			return this.post((path, body, o) => cb(path, JSON.parse(body), o), priority);
 		}
-		put(cb: (path: string, body: string, o: RequestObject) => any, priority = 50): Builder {
+		put(cb: (path: string, body: string, o: RequestObject) => any, priority = 50) {
 			return this.useMethod("put", async (o, path) => cb(path, await o.request.body, o), priority);
 		}
-		delete(cb: (path: string, get: NodeJS.Dict<string | boolean>, o: RequestObject) => any, priority = 50): Builder {
+		delete(cb: (path: string, get: NodeJS.Dict<string | boolean>, o: RequestObject) => any, priority = 50) {
 			return this.useMethod("delete", (o, path) => cb(path, o.request.stringParams, o), priority);
 		}
 		build(): RouteObj {
@@ -473,7 +472,6 @@ export class crud {
 			return res;
 		}
 	}
-}
 
 export function printIPs(tabs = 0, printInternal = false) {
 	const ips: NodeJS.Dict<string[]> = {
