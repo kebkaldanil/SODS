@@ -5,7 +5,7 @@ let mime: any;
 try {
 	mime = require("mime");
 } catch(e) {}
-import * as tools from "./utils";
+import * as utils from "./utils";
 import { ServerOptions, createServer as createHttpsServer } from "https";
 import { PortsArr, processFunction, RequestMessage, RequestObject, ResponseMessage, RouteObj, ServOptions } from "./types";
 import { Cookie, ReceivedCookie } from "../cookie";
@@ -86,7 +86,7 @@ export function json(o: RequestObject, data: any) {
 
 export function createProcessor(routeObj: RouteObj) {
 	return (request: RequestMessage, response: ResponseMessage) => {
-		const startTime = tools.formatedTime();
+		const startTime = utils.formatedTime();
 		const _writeHead = response.writeHead;
 		response.cookies = [];
 		response.writeHead = function (...args: any[]) {
@@ -96,23 +96,23 @@ export function createProcessor(routeObj: RouteObj) {
 		};
 		let path = decodeURI(request.url);
 		const spsi = path.indexOf('?');
-		request.stringParams = spsi > 0 ? tools.mapArrayToObject(path.substr(spsi + 1).split('&'), {
-			processor: l => tools.split(l, "=", 2, {
+		request.stringParams = spsi > 0 ? utils.mapArrayToObject(path.substr(spsi + 1).split('&'), {
+			processor: l => utils.split(l, "=", 2, {
 				exact: false
 			}),
 			allowBooleanIfOnlyKey: true
 		}) : {};
 		if (spsi > 0)
 			path = path.slice(0, spsi);
-		tools.computeOnce(request.headers, "cookie", () =>
+		utils.computeOnce(request.headers, "cookie", () =>
 		(request.headers.cookie
 			? request.headers.cookie.split(';').map(c => {
-				const ca = tools.split(c, "=", 2);
+				const ca = utils.split(c, "=", 2);
 				return new ReceivedCookie(ca[0].trim(), ca[1].trim());
 			})
 			: []));
 		path = path.replace(pathNormalizeRegExp, "");
-		tools.computeOnce(request, "body", () =>
+		utils.computeOnce(request, "body", () =>
 			new Promise((resolve, reject) => {
 				let body = "";
 				console.log("request body");
@@ -147,8 +147,8 @@ export function createProcessor(routeObj: RouteObj) {
 		});
 		if (o.doLog) {
 			console.log(`${startTime} -> request ${request.method} "${path}"`);
-			response.on("close", () => console.log(`${startTime} - ${tools.formatedTime()} -> closed ${request.method} "${path}"`));
-			response.on("finish", () => console.log(`${startTime} - ${tools.formatedTime()} -> finished ${request.method} "${path}"`));
+			response.on("close", () => console.log(`${startTime} - ${utils.formatedTime()} -> closed ${request.method} "${path}"`));
+			response.on("finish", () => console.log(`${startTime} - ${utils.formatedTime()} -> finished ${request.method} "${path}"`));
 		}
 	};
 };
@@ -232,14 +232,14 @@ export async function file2response(o: RequestObject, path: string, ranges?: str
 	}
 	if (ranges.length == 1) {
 		const stream = createReadStream(path, ranges[0]);
-		await tools.pipeFile(stream, response).finally(() => stream.close());
+		await utils.pipeFile(stream, response).finally(() => stream.close());
 	}
 	else {
 		for (let i = 0; i < ranges.length; i++) {
 			const range = ranges[i];
 			response.write(`\n--3d6b6a416f9b5\nContent-Type: ${type}\nContent-Range: bytes ${range.start || 0}-${range.end === 0 ? 0 : (range.end || (filestat.size - 1))}/${filestat.size}\n\n`);
 			const stream = createReadStream(path, range);
-			await tools.pipeFile(stream, response).finally(() => {
+			await utils.pipeFile(stream, response).finally(() => {
 				stream.destroy();
 				console.log("check");
 			});
@@ -302,7 +302,7 @@ export async function createSubServer(processor: RequestListener, ports: PortsAr
 			let err: unknown;
 			while (countout--) {
 				try {
-					const prt = tools.intRandbyLength(10000, 40000);
+					const prt = utils.intRandbyLength(10000, 40000);
 					return {
 						[prt]: await crt(processor, prt, options)
 					};
@@ -338,7 +338,7 @@ export async function defaultServerStart(routeObj: RouteObj, evalF = (0, eval), 
 	else
 		httpPort = [[80], [8080], "*"];
 	const processor = createProcessor(routeObj);
-	tools.initConsoleProcessor(evalF);
+	utils.initConsoleProcessor(evalF);
 	const res: any = await createSubServer(processor, httpPort);
 	if (serverOptions) {
 		httpsPort = httpsPort ? normPort(httpsPort) : [[443], [8443], "*"];
@@ -363,11 +363,11 @@ export function fastResponse(o: RequestObject, options: fastResponseOptions | nu
 		options = {
 			code: options
 		};
-	const code = tools.notNullOrDefault(options.code, 200);
-	const headers = tools.notNullOrDefault(options.headers, {});
+	const code = utils.notNullOrDefault(options.code, 200);
+	const headers = utils.notNullOrDefault(options.headers, {});
 	const body = options.body;
 	const statusText = options.statusText;
-	const doLog = tools.notNullOrDefault(options.doLog, o.doLog);
+	const doLog = utils.notNullOrDefault(options.doLog, o.doLog);
 	return new Promise<void>((response, reject) => {
 		try {
 			o.doLog = doLog;
@@ -428,7 +428,7 @@ export class crudBuilder {
 		return this.useMethod("post", async (o, path) => cb(path, await o.request.body, o), priority);
 	}
 	postForm(cb: (path: string, post: NodeJS.Dict<string | boolean>, o: RequestObject) => any, priority = 50) {
-		return this.post((path, body, o) => cb(path, tools.mapArrayToObject(body.split("&")), o), priority);
+		return this.post((path, body, o) => cb(path, utils.mapArrayToObject(body.split("&")), o), priority);
 	}
 	postJson(cb: (path: string, obj: any, o: RequestObject) => any, priority = 50) {
 		return this.post((path, body, o) => cb(path, JSON.parse(body), o), priority);
@@ -441,7 +441,7 @@ export class crudBuilder {
 	}
 	build(): RouteObj {
 		const res: RouteObj = {
-			[current]: tools.mapArrayToObject(Array.from(this.usedMethods), {
+			[current]: utils.mapArrayToObject(Array.from(this.usedMethods), {
 				processor: m => {
 					const procs = this.processors[m].sort((a, b) => a.priority - b.priority).map(v => v.cb);
 					return [m, async (o, path) => {
