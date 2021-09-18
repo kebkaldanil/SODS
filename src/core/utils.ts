@@ -2,7 +2,8 @@ import { ReadStream } from "fs";
 import * as readline from "readline";
 
 export const args = mapArrayToObject(process.argv.slice(2), {
-	allowBooleanIfOnlyKey: true
+	allowBooleanIfOnlyKey: true,
+    emptyIsError: false
 });
 
 /**
@@ -271,9 +272,9 @@ export function mapArrayToObject<elementT, resultT>(array: elementT[], options?:
                         break;
                     case 1:
                         if (allowBooleanIfOnlyKey)
-                            throw new Error("Only key found");
-                        else
                             res[a[0]] = true;
+                        else
+                            throw new Error("Only key found");
                         break;
                     default:
                         if (toManyIsError)
@@ -286,6 +287,7 @@ export function mapArrayToObject<elementT, resultT>(array: elementT[], options?:
                 throw new Error("Empty result");
             }
         } catch(e) {
+            console.log(array);
             if (throwIfError)
                 throw e;
             return;
@@ -294,16 +296,16 @@ export function mapArrayToObject<elementT, resultT>(array: elementT[], options?:
     return res;
 }
 
-export function split(str: string, separator: string, limit: 2, options: {
-    exact: false;
+export function split(str: string, separator: string, limit: 2, options?: {
+    exact?: false;
     fromEnd?: boolean;
 }): [string, string] | [string] | [];
-export function split(str: string, separator: string, limit: 2, options?: {
-    exact?: true;
+export function split(str: string, separator: string, limit: 2, options: {
+    exact: true;
     fromEnd?: boolean;
 }): [string, string];
-export function split<T extends number>(str: string, separator: string, limit: T, options?: {
-    exact?: true;
+export function split<T extends number>(str: string, separator: string, limit: T, options: {
+    exact: true;
     fromEnd?: boolean;
 }): string[] & { length: T };
 export function split(str: string, separator?: string, limit?: number, options?: {
@@ -316,7 +318,7 @@ export function split(str: string, separator: string = ",", limit: number = -1, 
 }) {
     if (!options)
         options = {};
-    const exact = notNullOrDefault(options.exact, true);
+    const exact = notNullOrDefault(options.exact, false);
     const fromEnd = notNullOrDefault(options.fromEnd, false);
     if (limit < 0)
         return str.split(separator);
@@ -337,7 +339,7 @@ export function split(str: string, separator: string = ",", limit: number = -1, 
         str = str.slice(si + 1);
     }
     if (exact && res.length !== limit)
-        throw Error("");
+        throw Error(JSON.stringify(res));
     res.push(str);
     return res;
 }

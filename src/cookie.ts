@@ -21,7 +21,9 @@ export class ReceivedCookie {
 	 * @returns cookie
 	 */
 	static fromString(cookieSrc: string) {
-		return new ReceivedCookie(...split(cookieSrc, '=', 2));
+		return new ReceivedCookie(...split(cookieSrc, '=', 2, {
+			exact: true
+		}));
 	}
 	/**
 	 * Create or copy cookie
