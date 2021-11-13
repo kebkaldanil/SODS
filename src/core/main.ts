@@ -84,7 +84,7 @@ export function json(o: RequestObject, data: any) {
 	return buffer;
 }
 
-export function createProcessor(routeObj: RouteObj) {
+export function createProcessor(routeObj: RouteObj): RequestListener {
 	return (request: RequestMessage, response: ResponseMessage) => {
 		const startTime = utils.formatedTime();
 		const _writeHead = response.writeHead;
@@ -115,7 +115,6 @@ export function createProcessor(routeObj: RouteObj) {
 		utils.computeOnce(request, "body", () =>
 			new Promise((resolve, reject) => {
 				let body = "";
-				console.log("request body");
 				request.on("end", () => resolve(body));
 				request.on("error", reject);
 				request.on("data", data => body += data);

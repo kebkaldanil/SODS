@@ -1,5 +1,5 @@
 const child_process = require("child_process");
-const fs = require("fs/promises");
+const fs = require("fs").promises;
 const buildCommand = "npx tsc";
 
 (async () => {
@@ -12,9 +12,9 @@ const buildCommand = "npx tsc";
             throw new Error();
         console.log(buildCommand);
         await exec(buildCommand, {});
-        const package = JSON.parse(await fs.readFile("package.json", "utf-8"));
-        delete package.devDependencies;
-        await fs.writeFile(buildPath + "/package.json", JSON.stringify(package));
+        const _package = JSON.parse(await fs.readFile("package.json", "utf-8"));
+        delete _package.devDependencies;
+        await fs.writeFile(buildPath + "/package.json", JSON.stringify(_package));
     } catch (_) {
         console.log("npm i");
         await exec("npm i");

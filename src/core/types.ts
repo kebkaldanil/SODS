@@ -4,8 +4,12 @@ import { current, onError, fromThere, resultProcessor } from "./constants";
 import { Cookie, ReceivedCookie } from "../cookie";
 
 export interface Dict<T> {
-	[index: string]: T | undefined
+	[key: string]: T
 };
+
+export interface ReadOnlyDict<T> {
+	readonly [key: string]: T;
+}
 
 export type processFunction = (o: RequestObject, path: string) => any | Promise<any>;
 

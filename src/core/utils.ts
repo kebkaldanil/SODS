@@ -1,10 +1,13 @@
 import { ReadStream } from "fs";
 import * as readline from "readline";
+import { ReadOnlyDict } from "./types";
 
 export const args = mapArrayToObject(process.argv.slice(2), {
 	allowBooleanIfOnlyKey: true,
     emptyIsError: false
-});
+}) as ReadOnlyDict<string | true>;
+
+Object.freeze(args);
 
 /**
  * tag function for time formatting
