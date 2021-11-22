@@ -10,6 +10,7 @@ import { ServerOptions, createServer as createHttpsServer } from "https";
 import { PortsArr, processFunction, RequestMessage, RequestObject, ResponseMessage, RouteObj, ServOptions } from "./types";
 import { Cookie, ReceivedCookie } from "../cookie";
 import { fromThere, current, onError, resultProcessor } from "./constants";
+import { join } from "path";
 
 const pathNormalizeRegExp = /^\/+|\/+$|\/+(?=\/)/g;
 
@@ -257,21 +258,16 @@ export function fileAsResponse(path: string, options?: {
 	logErrors?: boolean,
 	logRanges?: boolean
 }) {
-	if (!path)
-		path = "/";
-	if (!path.endsWith('/'))
-		path += '/';
 	options = Object.assign({ useRange: true, mime: mime.getType, hostingLike: false, logErrors: true, logRanges: false }, options);
 	const dl = options.doLog;
 	return async (o: RequestObject, p: string) => {
 		if (dl !== null && dl !== undefined)
 			o.doLog = dl;
-		let fp = path + p;
+		const fp = join(path, p);
 		try {
 			let filestat = await fsPromises.stat(fp);
 			if (options.hostingLike && filestat.isDirectory()) {
-				fp = fp + (fp.endsWith('/') ? "" : "/") + "index.html";
-				filestat = await fsPromises.stat(fp);
+				filestat = await fsPromises.stat(join(fp, "index.html"));
 			}
 			o.response.setHeader("Content-Type", typeof options.mime === "function" ? options.mime(p) : options.mime);
 			if (options.useRange && !o.request.headers.range)
