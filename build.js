@@ -8,7 +8,7 @@ const buildCommand = "npx tsc";
     if (!buildPath)
         throw new Error("no build path");
     try {
-        if (!await fs.stat("node_modules"))
+        if (!await fs.access("node_modules"))
             throw new Error();
         console.log(buildCommand);
         await exec(buildCommand, {});

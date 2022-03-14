@@ -1,15 +1,15 @@
 {
 	"compilerOptions": {
-		"target": "ES2020",
-		"module": "CommonJS",
 		"sourceMap": true,
 		"outDir": "build/SODS",
 		"declaration": true,
 		"rootDir": "src",
 		"removeComments": true,
-		"moduleResolution": "Node"
+		"moduleResolution": "Node",
+		"esModuleInterop": true,
+		"experimentalDecorators": true,
+		"emitDecoratorMetadata": true
 	},
-	//указывает что включаться должны только файлы из папки /src
 	"include": [
 		"src/**/*"
 	]

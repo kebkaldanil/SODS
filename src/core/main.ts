@@ -4,21 +4,24 @@ import { networkInterfaces } from "os";
 let mime: any;
 try {
 	mime = require("mime");
-} catch(e) {}
-import * as utils from "./utils";
+} catch (e) { }
 import { ServerOptions, createServer as createHttpsServer } from "https";
 import { PortsArr, processFunction, RequestMessage, RequestObject, ResponseMessage, RouteObj, ServOptions } from "./types";
 import { Cookie, ReceivedCookie } from "../cookie";
 import { fromThere, current, onError, resultProcessor } from "./constants";
-import { join } from "path";
-
-const pathNormalizeRegExp = /^\/+|\/+$|\/+(?=\/)/g;
+import systemPath from "path";
+import { URL, URLSearchParams } from "url";
+import { formatedTime } from "../utils/formaters";
+import { computeOnce, mapArrayToObject, notNullOrDefault } from "../utils/object";
+import { split } from "../utils/split";
+//import { pipeFile } from "../utils/file";
+import random from "../utils/random";
 
 async function processRequest(o: RequestObject, path: string, sect: RouteObj): Promise<any> {
 	try {
 		if (sect) {
 			let proc: processFunction;
-			if (typeof sect == "function")
+			if (typeof sect === "function")
 				proc = sect;
 			else {
 				let si = path.indexOf('/');
@@ -30,8 +33,9 @@ async function processRequest(o: RequestObject, path: string, sect: RouteObj): P
 					const res = await processRequest(o, path.substring(routepart.length + 1), sect[routepart]);
 					if (dab)
 						o.queue.pop();
-					if (res)
-						return res;
+					if (res !== undefined && res !== null) {
+						return sect[resultProcessor] ? sect[resultProcessor](res, o) : res;
+					}
 				}
 				if (sect[o.request.method])
 					proc = sect[o.request.method];
@@ -50,12 +54,14 @@ async function processRequest(o: RequestObject, path: string, sect: RouteObj): P
 				o.queue.forEach(v => v(o, path));
 				if (typeof proc === "function") {
 					let res = await proc(o, path);
-					if (sect[resultProcessor])
-						res = sect[resultProcessor](res, o);
-					if (res === undefined || res === null)
+					if (res === undefined || res === null) {
 						return true;
-					else
+					} else {
+						if (sect[resultProcessor]) {
+							res = sect[resultProcessor](res, o);
+						}
 						return res;
+					}
 				}
 				else {
 					return proc;
@@ -87,7 +93,7 @@ export function json(o: RequestObject, data: any) {
 
 export function createProcessor(routeObj: RouteObj): RequestListener {
 	return (request: RequestMessage, response: ResponseMessage) => {
-		const startTime = utils.formatedTime();
+		const startTime = formatedTime();
 		const _writeHead = response.writeHead;
 		response.cookies = [];
 		response.writeHead = function (...args: any[]) {
@@ -95,25 +101,17 @@ export function createProcessor(routeObj: RouteObj): RequestListener {
 				this.setHeader("Set-Cookie", this.cookies.map((v: Cookie) => Cookie.prototype.toString.call(v)));
 			return _writeHead.call(this, ...args);
 		};
-		let path = decodeURI(request.url);
-		const spsi = path.indexOf('?');
-		request.stringParams = spsi > 0 ? utils.mapArrayToObject(path.substr(spsi + 1).split('&'), {
-			processor: l => utils.split(l, "=", 2, {
-				exact: false
-			}),
-			allowBooleanIfOnlyKey: true
-		}) : {};
-		if (spsi > 0)
-			path = path.slice(0, spsi);
-		utils.computeOnce(request.headers, "cookie", () =>
+		const url = new URL(decodeURIComponent(request.url), ("http://" + request.headers.host) || "http://localhost");
+		const path = url.pathname;
+		request.searchParams = url.searchParams;
+		computeOnce(request.headers, "cookie", () =>
 		(request.headers.cookie
 			? request.headers.cookie.split(';').map(c => {
-				const ca = utils.split(c, "=", 2);
+				const ca = split(c, "=", 2);
 				return new ReceivedCookie(ca[0].trim(), ca[1].trim());
 			})
 			: []));
-		path = path.replace(pathNormalizeRegExp, "");
-		utils.computeOnce(request, "body", () =>
+		computeOnce(request, "body", () =>
 			new Promise((resolve, reject) => {
 				let body = "";
 				request.on("end", () => resolve(body));
@@ -138,17 +136,21 @@ export function createProcessor(routeObj: RouteObj): RequestListener {
 			console.error(e);
 		}).then(res => {
 			if (!o.response.writableEnded) {
-				if (typeof res === "object" || typeof res === "string") {
-					if (!o.response.hasHeader("Content-Type") && !o.response.headersSent)
+				if (typeof res === "string") {
+					if (!o.response.hasHeader("Content-Type") && !o.response.headersSent) {
 						o.response.setHeader("Content-Type", "text/html; charset=UTF-8");
+					}
+					o.response.end(res);
+				}
+				if (typeof res === "object" && (res instanceof Buffer || res instanceof Uint8Array)) {
 					o.response.end(res);
 				}
 			}
 		});
 		if (o.doLog) {
 			console.log(`${startTime} -> request ${request.method} "${path}"`);
-			response.on("close", () => console.log(`${startTime} - ${utils.formatedTime()} -> closed ${request.method} "${path}"`));
-			response.on("finish", () => console.log(`${startTime} - ${utils.formatedTime()} -> finished ${request.method} "${path}"`));
+			response.on("close", () => console.log(`${startTime} - ${formatedTime()} -> closed ${request.method} "${path}"`));
+			response.on("finish", () => console.log(`${startTime} - ${formatedTime()} -> finished ${request.method} "${path}"`));
 		}
 	};
 };
@@ -232,18 +234,20 @@ export async function file2response(o: RequestObject, path: string, ranges?: str
 	}
 	if (ranges.length == 1) {
 		const stream = createReadStream(path, ranges[0]);
-		await utils.pipeFile(stream, response).finally(() => stream.close());
+		for await (const chunk of stream) {
+			response.write(chunk);
+		}
+		//await pipeFile(stream, response);
 	}
 	else {
-		for (let i = 0; i < ranges.length; i++) {
-			const range = ranges[i];
+		for (const range of ranges) {
+			//const range = ranges[i];
 			response.write(`\n--3d6b6a416f9b5\nContent-Type: ${type}\nContent-Range: bytes ${range.start || 0}-${range.end === 0 ? 0 : (range.end || (filestat.size - 1))}/${filestat.size}\n\n`);
 			const stream = createReadStream(path, range);
-			await utils.pipeFile(stream, response).finally(() => {
-				stream.destroy();
-				console.log("check");
-			});
-
+			for await (const chunk of stream) {
+				response.write(chunk);
+			}
+			//await pipeFile(stream, response);
 		}
 		response.write("\n--3d6b6a416f9b5--");
 	}
@@ -263,17 +267,19 @@ export function fileAsResponse(path: string, options?: {
 	return async (o: RequestObject, p: string) => {
 		if (dl !== null && dl !== undefined)
 			o.doLog = dl;
-		const fp = join(path, p);
+		const fp = systemPath.join(path, p);
 		try {
 			let filestat = await fsPromises.stat(fp);
 			if (options.hostingLike && filestat.isDirectory()) {
-				filestat = await fsPromises.stat(join(fp, "index.html"));
+				filestat = await fsPromises.stat(systemPath.join(fp, "index.html"));
 			}
 			o.response.setHeader("Content-Type", typeof options.mime === "function" ? options.mime(p) : options.mime);
-			if (options.useRange && !o.request.headers.range)
+			if (options.useRange && !o.request.headers.range) {
 				o.response.setHeader("Content-Length", filestat.size);
-			if (o.doLog && o.request.headers.range && !options.logRanges)
+			}
+			if (o.doLog && o.request.headers.range && !options.logRanges) {
 				o.doLog = false;
+			}
 			await file2response(o, fp, options.useRange && o.request.headers.range, undefined, undefined, filestat);
 		} catch (e) {
 			if (options.logErrors)
@@ -290,16 +296,16 @@ function normPort(port: PortsArr | number) {
 }
 
 export async function createSubServer(processor: RequestListener, ports: PortsArr, options?: ServOptions) {
-	for (let vrnts of ports) {
+	for (let portVariants of ports) {
 		let brck = false;
-		if (vrnts === "*") {
+		if (portVariants === "*") {
 			let countout = 100;
 			let err: unknown;
 			while (countout--) {
 				try {
-					const prt = utils.intRandbyLength(10000, 40000);
+					const port = random.int.inRange(10000, 50000);
 					return {
-						[prt]: await crt(processor, prt, options)
+						[port]: await crt(processor, port, options)
 					};
 				}
 				catch (e) {
@@ -309,10 +315,10 @@ export async function createSubServer(processor: RequestListener, ports: PortsAr
 			console.log(err);
 			return process.exit(1);
 		}
-		if (!Array.isArray(vrnts))
-			vrnts = [vrnts];
+		if (!Array.isArray(portVariants))
+			portVariants = [portVariants];
 		const res: { [port: number]: Server } = {};
-		for (const prt of vrnts) {
+		for (const prt of portVariants) {
 			try {
 				res[prt] = await crt(processor, prt, options);
 				brck = true;
@@ -324,7 +330,12 @@ export async function createSubServer(processor: RequestListener, ports: PortsAr
 	}
 }
 
-export async function defaultServerStart(routeObj: RouteObj, evalF = (0, eval), serverOptions?: ServerOptions, httpPort?: PortsArr | number, httpsPort?: PortsArr | number): Promise<{ [port: number]: Server, processor: (request: RequestMessage, response: ResponseMessage) => void }> {
+export async function defaultServerStart(
+	routeObj: RouteObj,
+	serverOptions?: ServerOptions,
+	httpPort?: PortsArr | number,
+	httpsPort?: PortsArr | number
+): Promise<{ [port: number]: Server, processor: (request: RequestMessage, response: ResponseMessage) => void }> {
 	if (serverOptions && (typeof serverOptions !== "object" || Array.isArray(serverOptions) && !httpPort)) {
 		httpPort = serverOptions;
 		serverOptions = undefined;
@@ -333,7 +344,6 @@ export async function defaultServerStart(routeObj: RouteObj, evalF = (0, eval), 
 	else
 		httpPort = [[80], [8080], "*"];
 	const processor = createProcessor(routeObj);
-	utils.initConsoleProcessor(evalF);
 	const res: any = await createSubServer(processor, httpPort);
 	if (serverOptions) {
 		httpsPort = httpsPort ? normPort(httpsPort) : [[443], [8443], "*"];
@@ -358,11 +368,11 @@ export function fastResponse(o: RequestObject, options: fastResponseOptions | nu
 		options = {
 			code: options
 		};
-	const code = utils.notNullOrDefault(options.code, 200);
-	const headers = utils.notNullOrDefault(options.headers, {});
+	const code = notNullOrDefault(options.code, 200);
+	const headers = notNullOrDefault(options.headers, {});
 	const body = options.body;
 	const statusText = options.statusText;
-	const doLog = utils.notNullOrDefault(options.doLog, o.doLog);
+	const doLog = notNullOrDefault(options.doLog, o.doLog);
 	return new Promise<void>((response, reject) => {
 		try {
 			o.doLog = doLog;
@@ -413,17 +423,17 @@ export class crudBuilder {
 		this.processors[method].push({ cb: cb, priority });
 		return this;
 	}
-	get(cb: (path: string, get: NodeJS.Dict<string | boolean>, o: RequestObject) => any, priority = 50) {
-		return this.useMethod("get", (o, path) => cb(path, o.request.stringParams, o), priority);
+	get(cb: (path: string, get: URLSearchParams, o: RequestObject) => any, priority = 50) {
+		return this.useMethod("get", (o, path) => cb(path, o.request.searchParams, o), priority);
 	}
-	getRoot(cb: (get: NodeJS.Dict<string | boolean>, o: RequestObject) => any) {
-		return this.useMethod("get", (o, path) => path === "" && cb(o.request.stringParams, o), 0);
+	getRoot(cb: (get: URLSearchParams, o: RequestObject) => any) {
+		return this.useMethod("get", (o, path) => path === "" && cb(o.request.searchParams, o), 0);
 	}
 	post(cb: (path: string, body: string, o: RequestObject) => any, priority = 50) {
 		return this.useMethod("post", async (o, path) => cb(path, await o.request.body, o), priority);
 	}
 	postForm(cb: (path: string, post: NodeJS.Dict<string | boolean>, o: RequestObject) => any, priority = 50) {
-		return this.post((path, body, o) => cb(path, utils.mapArrayToObject(body.split("&")), o), priority);
+		return this.post((path, body, o) => cb(path, mapArrayToObject(body.split("&")), o), priority);
 	}
 	postJson(cb: (path: string, obj: any, o: RequestObject) => any, priority = 50) {
 		return this.post((path, body, o) => cb(path, JSON.parse(body), o), priority);
@@ -431,27 +441,21 @@ export class crudBuilder {
 	put(cb: (path: string, body: string, o: RequestObject) => any, priority = 50) {
 		return this.useMethod("put", async (o, path) => cb(path, await o.request.body, o), priority);
 	}
-	delete(cb: (path: string, get: NodeJS.Dict<string | boolean>, o: RequestObject) => any, priority = 50) {
-		return this.useMethod("delete", (o, path) => cb(path, o.request.stringParams, o), priority);
+	delete(cb: (path: string, get: URLSearchParams, o: RequestObject) => any, priority = 50) {
+		return this.useMethod("delete", (o, path) => cb(path, o.request.searchParams, o), priority);
 	}
 	build(): RouteObj {
 		const res: RouteObj = {
-			[current]: utils.mapArrayToObject(Array.from(this.usedMethods), {
-				processor: m => {
-					const procs = this.processors[m].sort((a, b) => a.priority - b.priority).map(v => v.cb);
-					return [m, async (o, path) => {
-						let error = { code: 404 };
+			[current]: mapArrayToObject<string, processFunction>(Array.from(this.usedMethods), {
+				processor: method => {
+					const procs = this.processors[method].sort((a, b) => a.priority - b.priority).map(v => v.cb);
+					return [method, async (o, path) => {
 						for (const proc of procs) {
-							try {
-								const res = await proc(o, path);
-								if (res)
-									return res;
-							} catch (e) {
-								if (Number.isInteger(e.code))
-									error = e;
-							}
+							const res = await proc(o, path);
+							if (res)
+								return res;
 						}
-						throw error;
+						notFound(o);
 					}];
 				},
 				throwIfError: true

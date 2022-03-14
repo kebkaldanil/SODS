@@ -2,6 +2,7 @@ import { IncomingMessage, ServerResponse } from "http";
 import { ServerOptions } from "https";
 import { current, onError, fromThere, resultProcessor } from "./constants";
 import { Cookie, ReceivedCookie } from "../cookie";
+import { URLSearchParams } from "url";
 
 export interface Dict<T> {
 	[key: string]: T
@@ -15,7 +16,7 @@ export type processFunction = (o: RequestObject, path: string) => any | Promise<
 
 export type RequestMessage = IncomingMessage & {
 	cookies: ReceivedCookie[];
-	stringParams: NodeJS.ReadOnlyDict<string | boolean>;
+	searchParams: URLSearchParams;
 	body: Promise<string>;
 }
 
