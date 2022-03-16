@@ -17,11 +17,7 @@ export function dataCopy<T extends {}>(obj: T): {} & T {
     return res;
 }
 
-export function notNullOrDefault<T>(value: T | null | undefined, _default: T) {
-    return value === null || value === undefined ? _default : value;
-}
-
-export function computeOnce<R extends unknown, T>(obj: R, key: PropertyKey, compute: () => T): R {
+export function computePropertyOnce<R extends {}, I extends keyof R>(obj: R, key: I, compute: () => R[I]): R {
     return Object.defineProperty(obj, key, {
         get: () => {
             delete obj[key];
@@ -204,10 +200,10 @@ export function mapArrayToObject<elementT, resultT>(array: elementT[], options?:
     if (!options)
         options = {};
     const processor = (options.processor || ((el: string) => split(el, '=', 2))) as unknown as (el: elementT) => any[];
-    const throwIfError = notNullOrDefault(options.throwIfError, true);
-    const allowBooleanIfOnlyKey = notNullOrDefault(options.allowBooleanIfOnlyKey, false);
-    const emptyIsError = notNullOrDefault(options.emptyIsError, false);
-    const toManyIsError = notNullOrDefault(options.toManyIsError, false);
+    const throwIfError = options.throwIfError ?? true;
+    const allowBooleanIfOnlyKey = options.allowBooleanIfOnlyKey ?? false;
+    const emptyIsError = options.emptyIsError ?? false;
+    const toManyIsError = options.toManyIsError ?? false;
     const res = {};
     array.forEach(s => {
         try {

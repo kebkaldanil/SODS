@@ -29,8 +29,6 @@ export function getArgumentKey(target: Object, propertyKey: string | symbol) {
     return foundArgumentKey;
 }
 
-export function Number(options: {}) {}
-
 export function getArgumentOptions(target: object, propertyKey: string | symbol) {
     const key = getArgumentKey(target, propertyKey);
     return {

@@ -12,10 +12,11 @@ import { fromThere, current, onError, resultProcessor } from "./constants";
 import systemPath from "path";
 import { URL, URLSearchParams } from "url";
 import { formatedTime } from "../utils/formaters";
-import { computeOnce, mapArrayToObject, notNullOrDefault } from "../utils/object";
+import { computePropertyOnce, mapArrayToObject } from "../utils/object";
 import { split } from "../utils/split";
 //import { pipeFile } from "../utils/file";
 import random from "../utils/random";
+import { boundry } from ".";
 
 async function processRequest(o: RequestObject, path: string, sect: RouteObj): Promise<any> {
 	try {
@@ -91,8 +92,11 @@ export function json(o: RequestObject, data: any) {
 	return buffer;
 }
 
+let i = 0;
+
 export function createProcessor(routeObj: RouteObj): RequestListener {
 	return (request: RequestMessage, response: ResponseMessage) => {
+		const index = i;
 		const startTime = formatedTime();
 		const _writeHead = response.writeHead;
 		response.cookies = [];
@@ -104,20 +108,23 @@ export function createProcessor(routeObj: RouteObj): RequestListener {
 		const url = new URL(decodeURIComponent(request.url), ("http://" + request.headers.host) || "http://localhost");
 		const path = url.pathname;
 		request.searchParams = url.searchParams;
-		computeOnce(request.headers, "cookie", () =>
-		(request.headers.cookie
-			? request.headers.cookie.split(';').map(c => {
-				const ca = split(c, "=", 2);
-				return new ReceivedCookie(ca[0].trim(), ca[1].trim());
-			})
-			: []));
-		computeOnce(request, "body", () =>
+		computePropertyOnce(request, "cookies", () => {
+			if (request.headers.cookie) {
+				return request.headers.cookie.split(';').map(c => {
+					const ca = split(c, "=", 2);
+					return new ReceivedCookie(ca[0].trim(), ca[1].trim());
+				});
+			}
+			return [];
+		});
+		computePropertyOnce(request, "body", () =>
 			new Promise((resolve, reject) => {
 				let body = "";
 				request.on("end", () => resolve(body));
 				request.on("error", reject);
 				request.on("data", data => body += data);
-			}));
+			})
+		);
 		const o: RequestObject = {
 			request: request,
 			response: response,
@@ -130,8 +137,9 @@ export function createProcessor(routeObj: RouteObj): RequestListener {
 				response.writeHead(500, "Internal Server Error");
 				response.end();
 			}
-			if (!o.response.writableEnded)
+			if (!o.response.writableEnded) {
 				o.response.end();
+			}
 			//if (o.doLog)
 			console.error(e);
 		}).then(res => {
@@ -148,9 +156,15 @@ export function createProcessor(routeObj: RouteObj): RequestListener {
 			}
 		});
 		if (o.doLog) {
-			console.log(`${startTime} -> request ${request.method} "${path}"`);
-			response.on("close", () => console.log(`${startTime} - ${formatedTime()} -> closed ${request.method} "${path}"`));
-			response.on("finish", () => console.log(`${startTime} - ${formatedTime()} -> finished ${request.method} "${path}"`));
+			console.log(`${index}: ${startTime} -> request ${request.method} "${path}"`);
+			response.on(
+				"close",
+				() => console.log(`${index}: ${startTime} - ${formatedTime()} -> closed ${request.method} "${path}"`)
+			);
+			response.on(
+				"finish",
+				() => console.log(`${index}: ${startTime} - ${formatedTime()} -> finished ${request.method} "${path}"`)
+			);
 		}
 	};
 };
@@ -224,7 +238,7 @@ export async function file2response(o: RequestObject, path: string, ranges?: str
 			response.setHeader("Content-Range", `bytes ${ranges[0].start || 0}-${tmp !== undefined ? tmp : (filestat.size - 1)}/${filestat.size}`);
 		}
 		else
-			response.setHeader("Content-Type", "multipart/byteranges; boundary=3d6b6a416f9b5");
+			response.setHeader("Content-Type", "multipart/byteranges; boundary=" + boundry);
 		response.writeHead(206, "Partial Content");
 	}
 	else {
@@ -242,14 +256,14 @@ export async function file2response(o: RequestObject, path: string, ranges?: str
 	else {
 		for (const range of ranges) {
 			//const range = ranges[i];
-			response.write(`\n--3d6b6a416f9b5\nContent-Type: ${type}\nContent-Range: bytes ${range.start || 0}-${range.end === 0 ? 0 : (range.end || (filestat.size - 1))}/${filestat.size}\n\n`);
+			response.write(`\n--${boundry}\nContent-Type: ${type}\nContent-Range: bytes ${range.start ?? 0}-${range.end === 0 ? 0 : (range.end || (filestat.size - 1))}/${filestat.size}\n\n`);
 			const stream = createReadStream(path, range);
 			for await (const chunk of stream) {
 				response.write(chunk);
 			}
 			//await pipeFile(stream, response);
 		}
-		response.write("\n--3d6b6a416f9b5--");
+		response.write(`\n--${boundry}--`);
 	}
 	response.end();
 }
@@ -368,11 +382,11 @@ export function fastResponse(o: RequestObject, options: fastResponseOptions | nu
 		options = {
 			code: options
 		};
-	const code = notNullOrDefault(options.code, 200);
-	const headers = notNullOrDefault(options.headers, {});
+	const code = options.code ?? 200;
+	const headers = options.headers ?? {};
 	const body = options.body;
 	const statusText = options.statusText;
-	const doLog = notNullOrDefault(options.doLog, o.doLog);
+	const doLog = options.doLog ?? o.doLog;
 	return new Promise<void>((response, reject) => {
 		try {
 			o.doLog = doLog;

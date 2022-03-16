@@ -1,5 +1,3 @@
-import { notNullOrDefault } from "./object";
-
 export function split(str: string, separator: string, limit: 2, options?: {
     exact?: false;
     fromEnd?: boolean;
@@ -22,8 +20,8 @@ export function split(str: string, separator: string = ",", limit: number = -1, 
 }) {
     if (!options)
         options = {};
-    const exact = notNullOrDefault(options.exact, false);
-    const fromEnd = notNullOrDefault(options.fromEnd, false);
+    const exact = options.exact ?? false;
+    const fromEnd = options.fromEnd ?? false;
     if (limit < 0)
         return str.split(separator);
     if (limit === 0)

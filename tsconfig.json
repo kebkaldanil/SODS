@@ -8,7 +8,11 @@
 		"moduleResolution": "Node",
 		"esModuleInterop": true,
 		"experimentalDecorators": true,
-		"emitDecoratorMetadata": true
+		"emitDecoratorMetadata": true,
+		"target": "ES2018",
+		"lib": [
+			"ES2018"
+		]
 	},
 	"include": [
 		"src/**/*"

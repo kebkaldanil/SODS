@@ -44,3 +44,14 @@ export function formatedTime() {
 export function roundNumber(value: number, to = 1) {
     return Math.round(value / to) * to;
 }
+
+export function numberOrDefault(value: unknown, _default = 0) {
+    const num = +value;
+    return num || num === 0 ? num : _default;
+}
+
+export function integerOrDefault(value: unknown, _default = 0) {
+    /**@ts-ignore */
+    const num = value | 0;
+    return num || num === 0 ? num : _default;
+}

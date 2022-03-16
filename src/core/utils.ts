@@ -2,11 +2,13 @@ import { ReadStream } from "fs";
 import * as readline from "readline";
 import { ReadOnlyDict } from "./types";
 
+/**
+ *@deprecated
+ */
 export const args = mapArrayToObject(process.argv.slice(2), {
 	allowBooleanIfOnlyKey: true,
     emptyIsError: false
 }) as ReadOnlyDict<string | true>;
-
 Object.freeze(args);
 
 /**
@@ -17,7 +19,7 @@ Object.freeze(args);
  * const hours = date.getHours();
  * const minutes = date.getMinutes();
  * const seconds = date.getSeconds();
- * consloe.log(time\`${hours}:${minutes}:${seconds}\`);
+ * consloe.log(time`${hours}:${minutes}:${seconds}`);
  * //"14:28:03"
  */
 export function time(strings: TemplateStringsArray, ...params: any[]) {
