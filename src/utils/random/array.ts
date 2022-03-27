@@ -27,6 +27,7 @@ export const array = {
       }
       case "int": {
         const result = <number[]>[];
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         /**@ts-ignore */
         const from = fromAsString | 0;
         const to = integerOrDefault(toAsString, Number.MAX_SAFE_INTEGER);
@@ -44,8 +45,8 @@ export const array = {
             str += String.fromCodePoint(
               int.inRange(
                 fromAsString.codePointAt(stri),
-                toAsString.codePointAt(stri)
-              )
+                toAsString.codePointAt(stri),
+              ),
             );
           }
           result[i] = str;
@@ -53,7 +54,7 @@ export const array = {
         return result;
       }
     }
-  }
+  },
 } as {
   of(
     type: "number" | "int" | `number:${number}-${number}` | `int:${number}-${number}`,

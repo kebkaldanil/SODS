@@ -1,18 +1,21 @@
 {
 	"compilerOptions": {
-		"sourceMap": true,
-		"outDir": "build/SODS",
+		"alwaysStrict": true,
 		"declaration": true,
-		"rootDir": "src",
-		"removeComments": true,
-		"moduleResolution": "Node",
+		"emitDecoratorMetadata": true,
 		"esModuleInterop": true,
 		"experimentalDecorators": true,
-		"emitDecoratorMetadata": true,
-		"target": "ES2018",
 		"lib": [
-			"ES2018"
-		]
+			"ES2021"
+		],
+		"module": "CommonJS",
+		"moduleResolution": "Node",
+		"outDir": "build/SODS",
+		"rootDir": "src",
+		"removeComments": true,
+		"sourceMap": true,
+		//"strictNullChecks": true,
+		"target": "ES2018"
 	},
 	"include": [
 		"src/**/*"

@@ -1,9 +1,9 @@
 import { Argument } from "./cl_arguments.decorators";
 
 export class CommandLineArgumentsBase {
-    @Argument("-p")
+  @Argument("-p")
     port: number;
 
-    @Argument()
+  @Argument()
     default: string;
 }

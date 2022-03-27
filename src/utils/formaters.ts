@@ -6,8 +6,8 @@ const nulls = "000000000000";
  * @returns number converted to string aligned by length
  */
 export function alignNumberToLength(num: number, length: number) {
-    const bs = "" + Math.trunc(num);
-    return nulls.slice(nulls.length + bs.length - length) + bs;
+  const bs = "" + Math.trunc(num);
+  return nulls.slice(nulls.length + bs.length - length) + bs;
 }
 
 /**
@@ -21,15 +21,15 @@ export function alignNumberToLength(num: number, length: number) {
  * consloe.log(time\`${hours}:${minutes}:${seconds}\`);
  * //"14:28:03"
  */
-export function time(strings: TemplateStringsArray, ...params: any[]) {
-    let res = "";
-    let i = 0;
-    while (i < params.length) {
-        const tmp = params[i];
-        const num = typeof tmp === "number" ? alignNumberToLength(tmp, 2) : tmp;
-        res += strings[i++] + num;
-    }
-    return res + strings[i];
+export function time(strings: TemplateStringsArray, ...params: unknown[]) {
+  let res = "";
+  let i = 0;
+  while (i < params.length) {
+    const tmp = params[i];
+    const num = typeof tmp === "number" ? alignNumberToLength(tmp, 2) : tmp;
+    res += strings[i++] + num;
+  }
+  return res + strings[i];
 }
 
 /**
@@ -37,21 +37,40 @@ export function time(strings: TemplateStringsArray, ...params: any[]) {
  * @example "14:28:03.049"
  */
 export function formatedTime() {
-    const p = new Date();
-    return time`${p.getHours()}:${p.getMinutes()}:${p.getSeconds()}.${alignNumberToLength(p.getMilliseconds(), 3)}`;
+  const p = new Date();
+  return time`${p.getHours()}:${p.getMinutes()}:${p.getSeconds()}.${alignNumberToLength(p.getMilliseconds(), 3)}`;
 }
 
 export function roundNumber(value: number, to = 1) {
-    return Math.round(value / to) * to;
+  return Math.round(value / to) * to;
 }
 
 export function numberOrDefault(value: unknown, _default = 0) {
-    const num = +value;
-    return num || num === 0 ? num : _default;
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  /**@ts-ignore */
+  const num = +value;
+  return num || num === 0 ? num : _default;
 }
 
 export function integerOrDefault(value: unknown, _default = 0) {
-    /**@ts-ignore */
-    const num = value | 0;
-    return num || num === 0 ? num : _default;
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  /**@ts-ignore */
+  const num = value | 0;
+  return num || num === 0 ? num : _default;
+}
+
+export function substrAfter(str: string, after: string) {
+  const index = str.indexOf(after);
+  if (index === -1) {
+    return "";
+  }
+  return str.slice(index + after.length);
+}
+
+export function substrAfterLast(str: string, after: string) {
+  const index = str.lastIndexOf(after);
+  if (index === -1) {
+    return "";
+  }
+  return str.slice(index + after.length);
 }

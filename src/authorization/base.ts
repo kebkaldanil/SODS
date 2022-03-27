@@ -1,14 +1,14 @@
 import { processFunction } from "../core/types";
 import crypto from "crypto";
 
-let lastSize = 16;
+const lastSize = 16;
 //TODO
-let lastValue = "";
+const lastValue = "";
 
 export const token = {
-    withLength(length = lastSize) {}
+  withLength(length = lastSize) {},
 };
 
 export interface Authorization {
-    authorize(): processFunction;
+  authorize(): processFunction;
 }
