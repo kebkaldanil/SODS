@@ -1,19 +1,16 @@
 import { createReadStream, Stats, promises as fsPromises } from "fs";
 import { createServer as createHttpServer, OutgoingHttpHeaders, RequestListener, Server } from "http";
 import { networkInterfaces } from "os";
-let mime: any;
-try {
-  mime = require("mime");
-} catch (e) { }
+import mime from "./utils/mime";
 import { ServerOptions, createServer as createHttpsServer } from "https";
 import { PortsArr, processFunction, RequestMessage, RequestObject, ResponseMessage, RouteBranch, RouteBranchWithoutResultProcessor, RouteLeaf, ServOptions } from "./types";
-import { Cookie, ReceivedCookie } from "../cookie";
+import { Cookie, ReceivedCookie } from "./cookie";
 import { fromThere, current, onError, resultProcessor } from "./constants";
 import systemPath from "path";
 import { URL, URLSearchParams } from "url";
-import { formatedTime } from "../utils/formaters";
-import { computePropertyOnce, mapArrayToObject } from "../utils/object";
-import { split } from "../utils/split";
+import { formatedTime } from "./utils/formaters";
+import { computePropertyOnce, mapArrayToObject } from "./utils/object";
+import { split } from "./utils/split";
 //import { pipeFile } from "../utils/file";
 import random from "../utils/random";
 import { boundry } from ".";

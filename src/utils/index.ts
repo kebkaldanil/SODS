@@ -1,6 +1,6 @@
 export * from "./file";
-export * from "./formaters";
-export * from "./object";
+export * from "../core/utils/formaters";
+export * from "../core/utils/object";
 export * as random from "./random";
-export * from "./split";
+export * from "../core/utils/split";
 export * as default from ".";

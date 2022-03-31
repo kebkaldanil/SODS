@@ -12,7 +12,7 @@ export function alignNumberToLength(num: number, length: number) {
 
 /**
  * tag function for time formatting
- * 
+ *
  * @example
  * const date = new Date();
  * const hours = date.getHours();

@@ -1,5 +1,5 @@
-import { substrAfterLast } from "./formaters";
-import { swapKeyAndValue } from "./object";
+import { substrAfterLast } from "../core/utils/formaters";
+import { swapKeyAndValue } from "../core/utils/object";
 
 const mimeTable = <const>{
   //text

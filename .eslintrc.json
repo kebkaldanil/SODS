@@ -39,8 +39,19 @@
     "no-self-compare": "error",
     "no-unmodified-loop-condition": "warn",
     "no-unreachable-loop": "warn",
-    "no-unused-private-class-members": "warn"
-    //"@typescript-eslint/": "error"
-    //"@typescript-eslint/": "error",
+    "no-unused-private-class-members": "warn",
+    "semi": "off",
+    "@typescript-eslint/semi": ["error"],
+    "eol-last": ["error", "always"],
+    "no-trailing-spaces": "error",
+    "@typescript-eslint/ban-types" : [
+      "error",
+      {
+        "types": {
+          "Function": false
+        },
+        "extendDefaults": true
+      }
+    ]
   }
 }

@@ -14,10 +14,16 @@
 		"rootDir": "src",
 		"removeComments": true,
 		"sourceMap": true,
-		//"strictNullChecks": true,
-		"target": "ES2018"
+		"strictNullChecks": true,
+		"target": "ES2018",
+		"newLine": "lf"
 	},
 	"include": [
 		"src/**/*"
+	],
+	"references": [
+		{
+			"core": "core"
+		}
 	]
 }

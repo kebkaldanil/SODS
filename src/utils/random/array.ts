@@ -1,6 +1,6 @@
 import { int, number } from ".";
 import { integerOrDefault, numberOrDefault } from "..";
-import { split } from "../split";
+import { split } from "../../core/utils/split";
 
 export type AccesibleType = "number" | "int" | `string:${string}-${string}` | `number:${number}-${number}` | `int:${number}-${number}`;
 export const array = {

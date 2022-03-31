@@ -1,27 +1,33 @@
-import { Dict, KeyOfAny } from "../core/types";
-import { split } from "./split";
+import { Dict, JsonPart, utils, KeyOfAny, Getters, JsonCopy } from "..";
 
-export type JsonAllowed = object | string | number | boolean | unknown[];
-
-export type JsonCopy<T extends JsonAllowed> = {
-  [K in Extract<keyof T, string> as T[K] extends (...args: unknown[]) => unknown ? never : K]: T[K] extends object ? JsonCopy<T[K]> : T[K];
-};
-
-export function jsonCopy<T extends JsonAllowed>(obj: T): JsonCopy<T> {
-  const res = {} as unknown;
-  for (const nm in obj) {
-    const v = obj[nm];
-    switch (typeof v) {
-      case "object":
-        res[nm] = jsonCopy(v as Extract<typeof v, object>);
-        break;
-      case "string":
-      case "number":
-      case "boolean":
-        res[nm] = v;
+export function jsonCopy<T>(value: T): JsonCopy<T> {
+  switch (typeof value) {
+    case "boolean":
+    case "number":
+    case "string":
+      return value as JsonCopy<T>;
+    case "object": {
+      if (Array.isArray(value)) {
+        const res: JsonPart[] = [];
+        for (const iterator of value) {
+          const temp = jsonCopy(iterator);
+          if (temp !== null) {
+            res.push(temp);
+          }
+        }
+        return res as JsonCopy<T>;
+      }
+      const res: Dict<JsonPart> = {};
+      for (const key in value) {
+        const temp = jsonCopy(value[key]);
+        if (temp) {
+          res[key] = temp as JsonPart;
+        }
+      }
+      return res as JsonCopy<T>;
     }
   }
-  return res as JsonCopy<T>;
+  return null as JsonCopy<T>;
 }
 
 export function computePropertyOnce<
@@ -44,10 +50,6 @@ export function computePropertyOnce<
   });
   return res;
 }
-
-export type Getters<T extends object> = {
-  [Key in keyof T]: () => T[Key]
-};
 
 export function extendsObjectWithOnceComputedProperties<
   T extends object,
@@ -142,7 +144,7 @@ export function mapArrayToObject<
 ): MapArrayToObjectResult<resultT, allowBooleanT> {
   if (!options)
     options = {};
-  const processor = (options.processor || ((el: string) => split(el, "=", 2))) as unknown as (el: sourceT) => MapToArrayProcessor<sourceT, resultT, allowBooleanT, emptyIsErrorT>;
+  const processor = (options.processor || ((el: string) => utils.split(el, "=", 2))) as unknown as (el: sourceT) => MapToArrayProcessor<sourceT, resultT, allowBooleanT, emptyIsErrorT>;
   const throwIfError = options.throwIfError ?? true;
   const allowBooleanIfOnlyKey = options.allowBooleanIfOnlyKey ?? false;
   const emptyIsError = options.emptyIsError ?? false;

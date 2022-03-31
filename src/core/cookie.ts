@@ -1,15 +1,15 @@
-import { mapArrayToObject, split } from "./core/utils";
+import { utils } from ".";
 
 /**
  * Cookie from client
  */
 export class ReceivedCookie {
   /**
-	 * Create cookie object
-	 * 
-	 * @param name - cookie name
-	 * @param value - cookie value
-	 */
+   * Create cookie object
+   * 
+   * @param name - cookie name
+   * @param value - cookie value
+   */
   constructor(name: string, value: string) {
     if (!(name && value))
       throw new TypeError("No " + (name ? "value" : "name") + " in cookie");
@@ -17,18 +17,18 @@ export class ReceivedCookie {
     this.value = value;
   }
   /**
-	 * @param cookieSrc - cookie header
-	 * @returns cookie
-	 */
+   * @param cookieSrc - cookie header
+   * @returns cookie
+   */
   static fromString(cookieSrc: string) {
-    return new ReceivedCookie(...split(cookieSrc, "=", 2, {
+    return new ReceivedCookie(...utils.split(cookieSrc, "=", 2, {
       exact: true,
     }));
   }
   /**
-	 * Create or copy cookie
-	 * @param src - cookie to copy or cookie header
-	 */
+   * Create or copy cookie
+   * @param src - cookie to copy or cookie header
+   */
   static from(src: string | ReceivedCookie) {
     if (typeof src === "string")
       return this.fromString(src);
@@ -47,8 +47,8 @@ export class ReceivedCookie {
  */
 export class Cookie extends ReceivedCookie {
   /**
-	 * Create or copy cookie
-	 */
+   * Create or copy cookie
+   */
   constructor(base: Cookie) {
     super(base.name, base.value);
     this.expires = base.expires;
@@ -61,19 +61,19 @@ export class Cookie extends ReceivedCookie {
   }
 
   /**
-	 * @param cookieSrc - cookie header
-	 * @returns cookie
-	 */
+   * @param cookieSrc - cookie header
+   * @returns cookie
+   */
   static fromString(cookieSrc: string) {
     const cookieSplit = cookieSrc.split(";");
-    const [name, value] = split(cookieSplit.shift(), "=", 2);
+    const [name, value] = utils.split(cookieSplit.shift(), "=", 2);
     const cookie = {
       name,
       value,
     };
-    const cookiePart = mapArrayToObject<string, string | number | boolean | Date>(cookieSplit, {
+    const cookiePart = utils.mapArrayToObject<string, string | number | boolean | Date>(cookieSplit, {
       processor: line => {
-        const [nameInCookie, value] = split(line, "=", 2);
+        const [nameInCookie, value] = utils.split(line, "=", 2);
         const nameInCookieLowered = nameInCookie.toLowerCase();
         switch (nameInCookieLowered) {
           case "expires":
@@ -95,9 +95,9 @@ export class Cookie extends ReceivedCookie {
     return new Cookie(cookie);
   }
   /**
-	 * Create or copy cookie
-	 * @param src - cookie to copy or cookie header
-	 */
+   * Create or copy cookie
+   * @param src - cookie to copy or cookie header
+   */
   static from(src: string | ReceivedCookie) {
     if (typeof src === "string")
       return this.fromString(src);

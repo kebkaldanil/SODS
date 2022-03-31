@@ -2,9 +2,9 @@ import fs, { PathLike } from "fs";
 import { URL } from "url";
 import { Buffer } from "buffer";
 import { ResponseMessage } from "../core";
-import { getExtension } from "./mime";
-import { extendsObjectWithOnceComputedProperties } from "./object";
-import { split } from "./split";
+import { getExtension } from "../core/utils/mime";
+import { extendsObjectWithOnceComputedProperties } from "../core/utils/object";
+import { split } from "../core/utils/split";
 
 export class ParseFileRangeError extends Error { }
 ParseFileRangeError.prototype.name = ParseFileRangeError.name;
