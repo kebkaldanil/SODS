@@ -1,4 +1,4 @@
 export * from "./formaters";
-export * from "./mime";
+export * as mime from "./mime";
 export * from "./object";
 export * from "./split";

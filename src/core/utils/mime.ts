@@ -1,43 +1,62 @@
-import { nextTick } from "process";
-import { promisify } from "util";
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
+import { CustomError } from "../decorators/custom-error.decorator";
+
+declare function require<T = unknown>(path: string): T;
 
 export interface Mime {
   getType(path: string): string | null;
   getExtension(mime: string): string | null;
 }
 
-let modulePromise: Promise<Mime> | Mime | undefined;
-let module: Mime;
+let mimeModule: Mime | undefined;
 
-export async function setMime(mime: Promise<Mime> | Mime) {
-  modulePromise = mime;
-  module = await modulePromise;
+@CustomError()
+export class MimeModuleNotFound extends Error {
+  constructor() {
+    super("Can not find mime module. Use \"setMime\" function");
+  }
 }
 
-module = await (modulePromise = (async () => {
-  await promisify(nextTick)();
-  if (modulePromise) {
-    return await modulePromise;
+@CustomError()
+export class MimeImportError extends Error {
+  constructor(path?: string) {
+    super(`Module must have "getType" and "getExtension" methods${path ? `(module path: "${path}")` : ""}`);
   }
+}
+
+export function setMime<T extends Mime = Mime>(_module: T | string) {
+  const foundModule = typeof _module === "string" ? require<Mime>(_module) : _module;
+  if (typeof foundModule === "object" && typeof foundModule.getType === "function" && typeof foundModule.getExtension === "function") {
+    mimeModule = foundModule;
+  } else {
+    throw new MimeImportError(typeof _module === "string" ? _module : undefined);
+  }
+}
+
+function tryImportOrDie() {
   try {
-    throw 0;
-    return await import("mime");
+    setMime("mime");
   } catch {
     try {
-      throw 0;
-      return await import("../../utils/small-mime");
+      setMime("../../utils/small-mime");
     } catch {
-      throw new Error("Can not find mime module. Use \"setMime\" function");
+      throw new MimeModuleNotFound;
     }
   }
-})());
+}
 
 export function getType(path: string) {
-  return module.getType(path);
+  if (!mimeModule) {
+    tryImportOrDie();
+  }
+  return mimeModule!.getType(path);
 }
 
 export function getExtension(mime: string) {
-  return module.getExtension(mime);
+  if (!mimeModule) {
+    tryImportOrDie();
+  }
+  return mimeModule!.getExtension(mime);
 }
 
 const mime = {

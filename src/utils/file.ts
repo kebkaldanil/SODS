@@ -5,9 +5,10 @@ import { ResponseMessage } from "../core";
 import { getExtension } from "../core/utils/mime";
 import { extendsObjectWithOnceComputedProperties } from "../core/utils/object";
 import { split } from "../core/utils/split";
+import { CustomError } from "../core/decorators/custom-error.decorator";
 
+@CustomError()
 export class ParseFileRangeError extends Error { }
-ParseFileRangeError.prototype.name = ParseFileRangeError.name;
 
 export type DirtyFileRange = [number | null, number] | [number, null];
 export type FileRange = [number, number];

@@ -11,21 +11,19 @@ export abstract class ErrorWithHttpCode<Code extends number> extends Error {
 
   readonly headers?: OutgoingHttpHeaders;
 
-  constructor(headers?: OutgoingHttpHeaders);
-  constructor(message: string, headers: OutgoingHttpHeaders);
+  constructor(headers: OutgoingHttpHeaders, message?: string);
+  constructor(message?: string);
 
   constructor(
-    messageOrHeaders?: string | OutgoingHttpHeaders,
-    headers?: OutgoingHttpHeaders
+    headersOrMessage?: OutgoingHttpHeaders | string,
+    message?: string,
   ) {
-    let message: string | undefined;
-    if (typeof messageOrHeaders === "string") {
-      message = messageOrHeaders;
+    if (typeof headersOrMessage === "string" && message == null) {
+      super(headersOrMessage);
     } else {
-      headers = messageOrHeaders;
+      super(message);
+      this.headers = headersOrMessage as OutgoingHttpHeaders;
     }
-    super(message);
-    this.headers = headers;
   }
 
   send(res: ResponseMessage) {

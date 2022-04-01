@@ -52,6 +52,7 @@
         },
         "extendDefaults": true
       }
-    ]
+    ],
+    "no-multiple-empty-lines": "error"
   }
 }
